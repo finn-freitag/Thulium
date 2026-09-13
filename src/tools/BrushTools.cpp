@@ -154,10 +154,11 @@ void ColorPickerTool::sample(Document* doc, const QPointF& docPos, ToolContext& 
     QImage composite = doc->composite();
     QColor c = composite.pixelColor(x, y);
 
-    if (isRightButton) {
-        ctx.secondaryColor = c;
-    } else {
+    bool targetIsPrimary = isRightButton ? !ctx.activeColorIsPrimary : ctx.activeColorIsPrimary;
+    if (targetIsPrimary) {
         ctx.primaryColor = c;
+    } else {
+        ctx.secondaryColor = c;
     }
     ctx.notifyChanged();
     emit doc->documentChanged();

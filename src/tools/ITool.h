@@ -61,6 +61,7 @@ enum class GradientMode {
 struct ToolContext {
     QColor primaryColor = Qt::black;
     QColor secondaryColor = Qt::white;
+    bool activeColorIsPrimary = true; // true = Primary slot selected, false = Secondary slot selected
     int brushWidth = 2;
     int tolerance = 50; // 0..100%
     bool antiAliasing = true;

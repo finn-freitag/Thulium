@@ -46,6 +46,11 @@ class ColorsDock : public QDockWidget {
 public:
     explicit ColorsDock(ToolManager* toolMgr, QWidget* parent = nullptr);
 
+    bool isEditingPrimary() const { return m_editingPrimary; }
+    void setEditingPrimary(bool primary);
+    QColor& activeTargetColor();
+    QColor activeTargetColor() const;
+
 private slots:
     void onWheelColorChanged(const QColor& c);
     void onRgbChanged();
@@ -60,7 +65,6 @@ private slots:
 private:
     void setupUI();
     void updateUIFromActiveColor();
-    QColor& activeTargetColor();
 
     ToolManager* m_toolMgr;
     bool m_editingPrimary = true; // true = Primary, false = Secondary

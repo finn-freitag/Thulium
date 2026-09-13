@@ -252,6 +252,50 @@ int main(int argc, char* argv[]) {
         assert(contextChangedFired);
         assert(toolMgr.context().secondaryColor == QColor(255, 0, 0));
 
+        // Test slot selection: when secondary slot is selected, left click picks secondary
+        // Set (20, 20) to green
+        layer->scanLine(20)[20] = 0xFF00FF00; // green ARGB
+        toolMgr.context().activeColorIsPrimary = false; // Secondary slot selected
+        contextChangedFired = false;
+        QMouseEvent leftClick2(QEvent::MouseButtonPress, QPointF(20, 20), Qt::LeftButton, Qt::LeftButton, Qt::NoModifier);
+        picker.mousePress(&leftClick2, doc.get(), QPointF(20, 20), toolMgr.context());
+
+        assert(contextChangedFired);
+        // Secondary color should now be green
+        assert(toolMgr.context().secondaryColor == QColor(0, 255, 0));
+        // Primary color should still be blue
+        assert(toolMgr.context().primaryColor == QColor(0, 0, 255));
+
+        // When secondary slot is selected, right click picks primary
+        contextChangedFired = false;
+        QMouseEvent rightClick2(QEvent::MouseButtonPress, QPointF(50, 50), Qt::RightButton, Qt::RightButton, Qt::NoModifier);
+        picker.mousePress(&rightClick2, doc.get(), QPointF(50, 50), toolMgr.context());
+
+        assert(contextChangedFired);
+        // Primary color should now be red
+        assert(toolMgr.context().primaryColor == QColor(255, 0, 0));
+
+        // Verify full synchronization with ColorsDock
+        pdn::ColorsDock colorsDock(&toolMgr);
+        colorsDock.setEditingPrimary(false);
+        assert(!colorsDock.isEditingPrimary());
+        assert(!toolMgr.context().activeColorIsPrimary);
+
+        // Pick green with left click
+        picker.mousePress(&leftClick2, doc.get(), QPointF(20, 20), toolMgr.context());
+        assert(toolMgr.context().secondaryColor == QColor(0, 255, 0));
+        assert(colorsDock.activeTargetColor() == QColor(0, 255, 0));
+
+        // Switch to primary
+        colorsDock.setEditingPrimary(true);
+        assert(colorsDock.isEditingPrimary());
+        assert(toolMgr.context().activeColorIsPrimary);
+
+        // Pick blue with left click
+        picker.mousePress(&leftClick, doc.get(), QPointF(10, 10), toolMgr.context());
+        assert(toolMgr.context().primaryColor == QColor(0, 0, 255));
+        assert(colorsDock.activeTargetColor() == QColor(0, 0, 255));
+
         std::cout << "  Passed: ColorPickerTool updates context and fires contextChanged for ColorsDock!" << std::endl;
     }
 

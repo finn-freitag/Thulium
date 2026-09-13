@@ -212,16 +212,14 @@ void ColorsDock::setupUI() {
     m_primaryBox->setFixedSize(36, 36);
     m_primaryBox->setToolTip("Primary Color (Click to select for editing)");
     connect(m_primaryBox, &QPushButton::clicked, this, [this]() {
-        m_editingPrimary = true;
-        updateUIFromActiveColor();
+        setEditingPrimary(true);
     });
 
     m_secondaryBox = new QPushButton(container);
     m_secondaryBox->setFixedSize(36, 36);
     m_secondaryBox->setToolTip("Secondary Color (Click to select for editing)");
     connect(m_secondaryBox, &QPushButton::clicked, this, [this]() {
-        m_editingPrimary = false;
-        updateUIFromActiveColor();
+        setEditingPrimary(false);
     });
 
     m_swapBtn = new QPushButton("<->", container);
@@ -332,12 +330,31 @@ void ColorsDock::setupUI() {
     setMinimumWidth(180);
 }
 
+void ColorsDock::setEditingPrimary(bool primary) {
+    m_editingPrimary = primary;
+    if (m_toolMgr) {
+        m_toolMgr->context().activeColorIsPrimary = primary;
+        m_toolMgr->context().notifyChanged();
+    } else {
+        updateUIFromActiveColor();
+    }
+}
+
 QColor& ColorsDock::activeTargetColor() {
-    return m_editingPrimary ? m_toolMgr->context().primaryColor : m_toolMgr->context().secondaryColor;
+    bool isPrimary = m_toolMgr ? m_toolMgr->context().activeColorIsPrimary : m_editingPrimary;
+    return isPrimary ? m_toolMgr->context().primaryColor : m_toolMgr->context().secondaryColor;
+}
+
+QColor ColorsDock::activeTargetColor() const {
+    bool isPrimary = m_toolMgr ? m_toolMgr->context().activeColorIsPrimary : m_editingPrimary;
+    return isPrimary ? m_toolMgr->context().primaryColor : m_toolMgr->context().secondaryColor;
 }
 
 void ColorsDock::updateUIFromActiveColor() {
     m_updating = true;
+    if (m_toolMgr) {
+        m_editingPrimary = m_toolMgr->context().activeColorIsPrimary;
+    }
     QColor pri = m_toolMgr->context().primaryColor;
     QColor sec = m_toolMgr->context().secondaryColor;
 
