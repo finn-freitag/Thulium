@@ -20,7 +20,7 @@ public:
     std::shared_ptr<ITool> activeTool() const;
     ToolType activeToolType() const { return m_activeToolType; }
 
-    void setDocument(Document* doc) { m_document = doc; }
+    void setDocument(Document* doc);
     Document* currentDocument() const { return m_document; }
 
     void setActiveTool(ToolType type, Document* doc = nullptr);

@@ -104,6 +104,9 @@ void LayersDock::setupUI() {
 }
 
 void LayersDock::setDocument(std::shared_ptr<Document> doc) {
+    if (m_doc) {
+        disconnect(m_doc.get(), nullptr, this, nullptr);
+    }
     m_doc = doc;
     if (m_doc) {
         connect(m_doc.get(), &Document::layerCountChanged, this, &LayersDock::refreshLayerList);

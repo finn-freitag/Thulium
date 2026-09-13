@@ -77,6 +77,8 @@ set(PDN_SOURCES
 
     src/ui/CanvasView.h
     src/ui/CanvasView.cpp
+    src/ui/DocumentStrip.h
+    src/ui/DocumentStrip.cpp
     src/ui/ToolOptionsBar.h
     src/ui/ToolOptionsBar.cpp
     src/ui/ToolsDock.h
@@ -141,4 +143,8 @@ add_test(NAME test_fixes COMMAND test_fixes)
 add_executable(test_image_operations tests/test_image_operations.cpp)
 target_link_libraries(test_image_operations PRIVATE pdn_core)
 add_test(NAME test_image_operations COMMAND test_image_operations)
+
+add_executable(test_multi_document tests/test_multi_document.cpp)
+target_link_libraries(test_multi_document PRIVATE pdn_core)
+add_test(NAME test_multi_document COMMAND test_multi_document)
 

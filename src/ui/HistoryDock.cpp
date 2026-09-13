@@ -44,13 +44,21 @@ void HistoryDock::setupUI() {
 }
 
 void HistoryDock::setDocument(std::shared_ptr<Document> doc) {
+    if (m_doc && m_doc->undoStack()) {
+        disconnect(m_undoBtn, &QToolButton::clicked, m_doc->undoStack(), &QUndoStack::undo);
+        disconnect(m_redoBtn, &QToolButton::clicked, m_doc->undoStack(), &QUndoStack::redo);
+        disconnect(m_doc->undoStack(), &QUndoStack::canUndoChanged, m_undoBtn, &QToolButton::setEnabled);
+        disconnect(m_doc->undoStack(), &QUndoStack::canRedoChanged, m_redoBtn, &QToolButton::setEnabled);
+    }
     m_doc = doc;
-    if (m_doc) {
+    if (m_doc && m_doc->undoStack()) {
         m_undoView->setStack(m_doc->undoStack());
         connect(m_undoBtn, &QToolButton::clicked, m_doc->undoStack(), &QUndoStack::undo);
         connect(m_redoBtn, &QToolButton::clicked, m_doc->undoStack(), &QUndoStack::redo);
         connect(m_doc->undoStack(), &QUndoStack::canUndoChanged, m_undoBtn, &QToolButton::setEnabled);
         connect(m_doc->undoStack(), &QUndoStack::canRedoChanged, m_redoBtn, &QToolButton::setEnabled);
+        m_undoBtn->setEnabled(m_doc->undoStack()->canUndo());
+        m_redoBtn->setEnabled(m_doc->undoStack()->canRedo());
     } else {
         m_undoView->setStack(nullptr);
         m_undoBtn->setEnabled(false);

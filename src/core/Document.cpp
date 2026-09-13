@@ -29,11 +29,19 @@ void Document::setFilePath(const QString& path) {
     emit documentChanged();
 }
 
+void Document::setTitle(const QString& title) {
+    m_customTitle = title;
+    emit documentChanged();
+}
+
 QString Document::fileName() const {
-    if (m_filePath.isEmpty()) {
-        return "Untitled";
+    if (!m_filePath.isEmpty()) {
+        return QFileInfo(m_filePath).fileName();
     }
-    return QFileInfo(m_filePath).fileName();
+    if (!m_customTitle.isEmpty()) {
+        return m_customTitle;
+    }
+    return "Untitled";
 }
 
 bool Document::isModified() const {

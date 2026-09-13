@@ -27,6 +27,8 @@ public:
     QString filePath() const { return m_filePath; }
     void setFilePath(const QString& path);
     QString fileName() const;
+    QString customTitle() const { return m_customTitle; }
+    void setTitle(const QString& title);
     bool isModified() const;
 
     QUndoStack* undoStack() { return &m_undoStack; }
@@ -98,6 +100,7 @@ private:
     int m_height;
     double m_dpi = 96.0;
     QString m_filePath;
+    QString m_customTitle;
     QList<std::shared_ptr<Layer>> m_layers;
     int m_activeLayerIndex = 0;
     Selection m_selection;

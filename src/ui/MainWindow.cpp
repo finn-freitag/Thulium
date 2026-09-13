@@ -20,6 +20,10 @@
 #include <QSpinBox>
 #include <QDoubleSpinBox>
 #include <QApplication>
+#include <QVBoxLayout>
+#include <QFileInfo>
+#include <QUrl>
+#include <algorithm>
 
 namespace pdn {
 
@@ -33,11 +37,38 @@ MainWindow::MainWindow(QWidget* parent)
       m_pluginMgr(new PluginManager(this)) {
     setWindowTitle("Paint.NET Clone");
     resize(1200, 800);
+    setAcceptDrops(true);
 
     qApp->installEventFilter(this);
 
+    m_documentStrip = new DocumentStrip(this);
     m_canvasView = new CanvasView(m_toolMgr, this);
-    setCentralWidget(m_canvasView);
+
+    QWidget* centralContainer = new QWidget(this);
+    QVBoxLayout* centralLayout = new QVBoxLayout(centralContainer);
+    centralLayout->setContentsMargins(0, 0, 0, 0);
+    centralLayout->setSpacing(0);
+    centralLayout->addWidget(m_documentStrip);
+    centralLayout->addWidget(m_canvasView, 1);
+    setCentralWidget(centralContainer);
+
+    connect(m_documentStrip, &DocumentStrip::documentSelected, this, &MainWindow::setActiveDocumentIndex);
+    connect(m_documentStrip, &DocumentStrip::closeRequested, this, &MainWindow::closeDocument);
+    connect(m_documentStrip, &DocumentStrip::newDocumentRequested, this, &MainWindow::onNew);
+    connect(m_documentStrip, &DocumentStrip::saveRequested, this, [this](int idx) { saveDocument(idx); });
+    connect(m_documentStrip, &DocumentStrip::saveAsRequested, this, [this](int idx) { saveDocumentAs(idx); });
+    connect(m_documentStrip, &DocumentStrip::closeAllRequested, this, &MainWindow::onCloseAll);
+    connect(m_documentStrip, &DocumentStrip::closeOthersRequested, this, [this](int keepIdx) {
+        if (keepIdx < 0 || keepIdx >= m_documents.size()) return;
+        auto keepDoc = m_documents[keepIdx];
+        for (int i = m_documents.size() - 1; i >= 0; --i) {
+            if (m_documents[i] != keepDoc) {
+                if (!closeDocument(i)) {
+                    break;
+                }
+            }
+        }
+    });
 
     setupMenus();
     setupToolbars();
@@ -48,20 +79,221 @@ MainWindow::MainWindow(QWidget* parent)
     newDocument(800, 600);
 }
 
-void MainWindow::newDocument(int width, int height) {
-    clearLastCopied();
-    m_doc = std::make_shared<Document>(width, height);
+QString MainWindow::generateUntitledTitle() {
+    if (m_documents.isEmpty()) {
+        return "Untitled";
+    }
+    bool hasUntitled1 = false;
+    for (const auto& d : m_documents) {
+        if (d->fileName() == "Untitled") {
+            hasUntitled1 = true;
+            break;
+        }
+    }
+    if (!hasUntitled1) {
+        return "Untitled";
+    }
+    for (int n = 2; ; ++n) {
+        QString candidate = QString("Untitled %1").arg(n);
+        bool used = false;
+        for (const auto& d : m_documents) {
+            if (d->fileName() == candidate) {
+                used = true;
+                break;
+            }
+        }
+        if (!used) return candidate;
+    }
+}
+
+int MainWindow::addDocument(std::shared_ptr<Document> doc, bool makeActive) {
+    if (!doc) return -1;
+
+    int newIdx = m_documents.size();
+    m_documents.append(doc);
+    m_documentStrip->addDocument(doc);
+
+    connect(doc.get(), &Document::documentChanged, this, [this, doc]() {
+        if (m_doc == doc) {
+            updateTitle();
+        }
+        int idx = indexOfDocument(doc.get());
+        if (idx >= 0) {
+            m_documentStrip->updateDocument(idx);
+            updateWindowMenu();
+        }
+    });
+
+    if (doc->undoStack()) {
+        connect(doc->undoStack(), &QUndoStack::cleanChanged, this, [this, doc](bool) {
+            if (m_doc == doc) {
+                updateTitle();
+            }
+            int idx = indexOfDocument(doc.get());
+            if (idx >= 0) {
+                m_documentStrip->updateDocument(idx);
+                updateWindowMenu();
+            }
+        });
+    }
+
+    if (makeActive || m_activeDocIndex < 0) {
+        setActiveDocumentIndex(newIdx);
+    } else {
+        updateWindowMenu();
+    }
+
+    return newIdx;
+}
+
+void MainWindow::setActiveDocumentIndex(int index) {
+    if (index < 0 || index >= m_documents.size()) return;
+    if (index == m_activeDocIndex && m_doc == m_documents[index]) return;
+
+    m_activeDocIndex = index;
+    m_doc = m_documents[m_activeDocIndex];
+
     m_toolMgr->setDocument(m_doc.get());
     m_canvasView->setDocument(m_doc);
     m_historyDock->setDocument(m_doc);
     m_layersDock->setDocument(m_doc);
 
-    connect(m_doc.get(), &Document::documentChanged, this, &MainWindow::updateTitle);
+    m_documentStrip->setCurrentIndex(m_activeDocIndex);
     updateTitle();
-    m_statusWidget->setDocumentSize(width, height);
+    updateWindowMenu();
+}
+
+std::shared_ptr<Document> MainWindow::activeDocument() const {
+    if (m_activeDocIndex >= 0 && m_activeDocIndex < m_documents.size()) {
+        return m_documents[m_activeDocIndex];
+    }
+    return nullptr;
+}
+
+std::shared_ptr<Document> MainWindow::documentAt(int index) const {
+    if (index >= 0 && index < m_documents.size()) {
+        return m_documents[index];
+    }
+    return nullptr;
+}
+
+int MainWindow::indexOfDocument(const Document* doc) const {
+    for (int i = 0; i < m_documents.size(); ++i) {
+        if (m_documents[i].get() == doc) return i;
+    }
+    return -1;
+}
+
+void MainWindow::closeDocumentWithoutPrompt(int index) {
+    if (index < 0 || index >= m_documents.size()) return;
+    auto doc = m_documents[index];
+
+    disconnect(doc.get(), nullptr, this, nullptr);
+    m_canvasView->removeDocumentViewState(doc.get());
+
+    m_documents.removeAt(index);
+    m_documentStrip->removeDocument(index);
+
+    if (m_documents.isEmpty()) {
+        m_activeDocIndex = -1;
+        m_doc = nullptr;
+    } else {
+        int newIdx = m_activeDocIndex;
+        if (newIdx == index) {
+            newIdx = std::clamp(index, 0, static_cast<int>(m_documents.size()) - 1);
+            m_activeDocIndex = -1; // force switch
+            setActiveDocumentIndex(newIdx);
+        } else if (newIdx > index) {
+            m_activeDocIndex--;
+            m_documentStrip->setCurrentIndex(m_activeDocIndex);
+            updateWindowMenu();
+        }
+    }
+}
+
+bool MainWindow::maybeSaveDocument(int index) {
+    if (index < 0 || index >= m_documents.size()) return true;
+    auto doc = m_documents[index];
+    if (!doc->isModified()) return true;
+
+    // Switch to the document so the user can inspect it
+    setActiveDocumentIndex(index);
+
+    QMessageBox box(this);
+    box.setWindowTitle("Save Changes?");
+    box.setText(QString("Save changes to \"%1\" before closing?").arg(doc->fileName()));
+    box.setIcon(QMessageBox::Question);
+    box.setStandardButtons(QMessageBox::Save | QMessageBox::Discard | QMessageBox::Cancel);
+    box.setDefaultButton(QMessageBox::Save);
+
+    int ret = box.exec();
+    if (ret == QMessageBox::Save) {
+        return saveDocument(index);
+    } else if (ret == QMessageBox::Discard) {
+        return true;
+    } else { // Cancel
+        return false;
+    }
+}
+
+bool MainWindow::closeDocument(int index) {
+    if (index < 0 || index >= m_documents.size()) return false;
+
+    if (!maybeSaveDocument(index)) {
+        return false;
+    }
+
+    closeDocumentWithoutPrompt(index);
+
+    if (m_documents.isEmpty()) {
+        newDocument(800, 600);
+    }
+
+    return true;
+}
+
+bool MainWindow::closeActiveDocument() {
+    return closeDocument(m_activeDocIndex);
+}
+
+bool MainWindow::closeAllDocuments() {
+    while (!m_documents.isEmpty()) {
+        // If there is only 1 pristine default document remaining, we're done
+        if (m_documents.size() == 1 && !m_documents[0]->isModified() && m_documents[0]->filePath().isEmpty()) {
+            break;
+        }
+
+        int lastIdx = m_documents.size() - 1;
+        if (!closeDocument(lastIdx)) {
+            return false;
+        }
+    }
+    return true;
+}
+
+void MainWindow::newDocument(int width, int height) {
+    clearLastCopied();
+
+    auto doc = std::make_shared<Document>(width, height);
+    QString title = generateUntitledTitle();
+    doc->setTitle(title);
+
+    addDocument(doc, true);
 }
 
 bool MainWindow::openFile(const QString& filePath) {
+    // Check if already open
+    QFileInfo newFi(filePath);
+    for (int i = 0; i < m_documents.size(); ++i) {
+        if (!m_documents[i]->filePath().isEmpty()) {
+            QFileInfo existingFi(m_documents[i]->filePath());
+            if (existingFi.canonicalFilePath() == newFi.canonicalFilePath()) {
+                setActiveDocumentIndex(i);
+                return true;
+            }
+        }
+    }
+
     QString err;
     auto doc = ImageIO::openDocument(filePath, &err);
     if (!doc) {
@@ -70,15 +302,16 @@ bool MainWindow::openFile(const QString& filePath) {
     }
 
     clearLastCopied();
-    m_doc = doc;
-    m_toolMgr->setDocument(m_doc.get());
-    m_canvasView->setDocument(m_doc);
-    m_historyDock->setDocument(m_doc);
-    m_layersDock->setDocument(m_doc);
 
-    connect(m_doc.get(), &Document::documentChanged, this, &MainWindow::updateTitle);
-    updateTitle();
-    m_statusWidget->setDocumentSize(m_doc->width(), m_doc->height());
+    // If currently there is only 1 untouched default document, replace it
+    if (m_documents.size() == 1 &&
+        m_documents[0]->filePath().isEmpty() &&
+        !m_documents[0]->isModified() &&
+        m_documents[0]->undoStack()->count() == 0) {
+        closeDocumentWithoutPrompt(0);
+    }
+
+    addDocument(doc, true);
     return true;
 }
 
@@ -98,6 +331,44 @@ void MainWindow::updateTitle() {
     setWindowTitle(title);
 }
 
+void MainWindow::updateWindowMenu() {
+    if (!m_windowMenu) return;
+
+    for (QAction* act : m_windowDocActions) {
+        m_windowMenu->removeAction(act);
+        delete act;
+    }
+    m_windowDocActions.clear();
+
+    for (int i = 0; i < m_documents.size(); ++i) {
+        auto doc = m_documents[i];
+        QString text = QString("&%1 %2").arg(i + 1).arg(doc->fileName());
+        if (doc->isModified()) {
+            text += "*";
+        }
+        QAction* act = new QAction(text, m_windowMenu);
+        act->setCheckable(true);
+        act->setChecked(i == m_activeDocIndex);
+        connect(act, &QAction::triggered, this, [this, i]() {
+            setActiveDocumentIndex(i);
+        });
+        m_windowMenu->addAction(act);
+        m_windowDocActions.append(act);
+    }
+}
+
+void MainWindow::nextDocument() {
+    if (m_documents.size() <= 1) return;
+    int nextIdx = (m_activeDocIndex + 1) % m_documents.size();
+    setActiveDocumentIndex(nextIdx);
+}
+
+void MainWindow::previousDocument() {
+    if (m_documents.size() <= 1) return;
+    int prevIdx = (m_activeDocIndex - 1 + m_documents.size()) % m_documents.size();
+    setActiveDocumentIndex(prevIdx);
+}
+
 void MainWindow::setupMenus() {
     QMenuBar* mb = menuBar();
 
@@ -108,8 +379,11 @@ void MainWindow::setupMenus() {
     fileMenu->addSeparator();
     fileMenu->addAction("&Save", this, &MainWindow::onSave, QKeySequence::Save);
     fileMenu->addAction("Save &As...", this, &MainWindow::onSaveAs, QKeySequence::SaveAs);
+    fileMenu->addAction("Save Al&l", this, &MainWindow::onSaveAll, QKeySequence("Ctrl+Alt+S"));
     fileMenu->addSeparator();
     fileMenu->addAction("&Close", this, &MainWindow::onClose, QKeySequence::Close);
+    fileMenu->addAction("Close &All", this, &MainWindow::onCloseAll, QKeySequence("Ctrl+Shift+W"));
+    fileMenu->addSeparator();
     fileMenu->addAction("E&xit", this, &QWidget::close, QKeySequence::Quit);
 
     // --- Edit Menu ---
@@ -188,9 +462,9 @@ void MainWindow::setupMenus() {
     blursMenu->addAction("&Gaussian Blur...", this, &MainWindow::onGaussianBlur);
 
     // --- Window Menu ---
-    QMenu* windowMenu = mb->addMenu("&Window");
-    windowMenu->addAction("&Reset Window Locations", this, &MainWindow::onResetWindowLocations);
-    windowMenu->addSeparator();
+    m_windowMenu = mb->addMenu("&Window");
+    m_windowMenu->addAction("&Reset Window Locations", this, &MainWindow::onResetWindowLocations);
+    m_windowMenu->addSeparator();
 
     // --- Help Menu ---
     QMenu* helpMenu = mb->addMenu("&Help");
@@ -221,32 +495,32 @@ void MainWindow::setupDocks() {
     m_colorsDock = new ColorsDock(m_toolMgr, this);
     addDockWidget(Qt::LeftDockWidgetArea, m_colorsDock);
 
-    // Add toggles to Window menu
-    QMenu* winMenu = findChild<QMenu*>("Window");
-    if (!winMenu) {
-        for (auto m : menuBar()->findChildren<QMenu*>()) {
-            if (m->title().contains("Window")) {
-                winMenu = m;
-                break;
-            }
-        }
-    }
-    if (winMenu) {
-        QAction* tAct = winMenu->addAction("&Tools", m_toolsDock, &QDockWidget::setVisible);
+    // Add toggles and image items to Window menu
+    if (m_windowMenu) {
+        QAction* tAct = m_windowMenu->addAction("&Tools", m_toolsDock, &QDockWidget::setVisible);
         tAct->setCheckable(true); tAct->setShortcut(QKeySequence("F5")); tAct->setChecked(true);
         connect(m_toolsDock, &QDockWidget::visibilityChanged, tAct, &QAction::setChecked);
 
-        QAction* hAct = winMenu->addAction("&History", m_historyDock, &QDockWidget::setVisible);
+        QAction* hAct = m_windowMenu->addAction("&History", m_historyDock, &QDockWidget::setVisible);
         hAct->setCheckable(true); hAct->setShortcut(QKeySequence("F6")); hAct->setChecked(true);
         connect(m_historyDock, &QDockWidget::visibilityChanged, hAct, &QAction::setChecked);
 
-        QAction* lAct = winMenu->addAction("&Layers", m_layersDock, &QDockWidget::setVisible);
+        QAction* lAct = m_windowMenu->addAction("&Layers", m_layersDock, &QDockWidget::setVisible);
         lAct->setCheckable(true); lAct->setShortcut(QKeySequence("F7")); lAct->setChecked(true);
         connect(m_layersDock, &QDockWidget::visibilityChanged, lAct, &QAction::setChecked);
 
-        QAction* cAct = winMenu->addAction("&Colors", m_colorsDock, &QDockWidget::setVisible);
+        QAction* cAct = m_windowMenu->addAction("&Colors", m_colorsDock, &QDockWidget::setVisible);
         cAct->setCheckable(true); cAct->setShortcut(QKeySequence("F8")); cAct->setChecked(true);
         connect(m_colorsDock, &QDockWidget::visibilityChanged, cAct, &QAction::setChecked);
+
+        m_windowMenu->addSeparator();
+        QAction* nextAct = m_windowMenu->addAction("&Next Image", this, &MainWindow::nextDocument, QKeySequence("Ctrl+Tab"));
+        nextAct->setShortcuts({QKeySequence("Ctrl+Tab"), QKeySequence("Ctrl+PageDown")});
+        QAction* prevAct = m_windowMenu->addAction("&Previous Image", this, &MainWindow::previousDocument, QKeySequence("Ctrl+Shift+Tab"));
+        prevAct->setShortcuts({QKeySequence("Ctrl+Shift+Tab"), QKeySequence("Ctrl+PageUp")});
+        m_windowMenu->addAction("&Close", this, &MainWindow::onClose, QKeySequence::Close);
+        m_windowMenu->addAction("Close &All", this, &MainWindow::onCloseAll, QKeySequence("Ctrl+Shift+W"));
+        m_windowMenu->addSeparator();
     }
 
     for (QAction* act : findChildren<QAction*>()) {
@@ -282,41 +556,75 @@ void MainWindow::onOpen() {
     }
 }
 
-bool MainWindow::onSave() {
-    if (!m_doc) return false;
-    if (m_doc->filePath().isEmpty()) {
-        return onSaveAs();
+bool MainWindow::saveDocument(int index) {
+    if (index < 0 || index >= m_documents.size()) return false;
+    auto doc = m_documents[index];
+    if (doc->filePath().isEmpty()) {
+        return saveDocumentAs(index);
     }
     QString err;
-    if (!ImageIO::saveDocument(*m_doc, m_doc->filePath(), &err)) {
+    if (!ImageIO::saveDocument(*doc, doc->filePath(), &err)) {
         QMessageBox::critical(this, "Error Saving File", err);
         return false;
     }
-    m_doc->undoStack()->setClean();
-    updateTitle();
+    doc->undoStack()->setClean();
+    if (m_doc == doc) updateTitle();
+    m_documentStrip->updateDocument(index);
+    updateWindowMenu();
     return true;
 }
 
-bool MainWindow::onSaveAs() {
-    if (!m_doc) return false;
-    QString file = QFileDialog::getSaveFileName(this, "Save Image As",
-                                               m_doc->filePath().isEmpty() ? "Untitled.pdn" : m_doc->filePath(),
-                                               ImageIO::saveFileFilter());
+bool MainWindow::saveDocumentAs(int index) {
+    if (index < 0 || index >= m_documents.size()) return false;
+    auto doc = m_documents[index];
+    QString defaultName = doc->filePath().isEmpty() ? (doc->fileName() + ".pdn") : doc->filePath();
+    QString file = QFileDialog::getSaveFileName(this, "Save Image As", defaultName, ImageIO::saveFileFilter());
     if (file.isEmpty()) return false;
 
     QString err;
-    if (!ImageIO::saveDocument(*m_doc, file, &err)) {
+    if (!ImageIO::saveDocument(*doc, file, &err)) {
         QMessageBox::critical(this, "Error Saving File", err);
         return false;
     }
-    m_doc->setFilePath(file);
-    m_doc->undoStack()->setClean();
-    updateTitle();
+    doc->setFilePath(file);
+    doc->undoStack()->setClean();
+    if (m_doc == doc) updateTitle();
+    m_documentStrip->updateDocument(index);
+    updateWindowMenu();
     return true;
 }
 
+bool MainWindow::saveAllDocuments() {
+    bool allSuccess = true;
+    for (int i = 0; i < m_documents.size(); ++i) {
+        if (m_documents[i]->isModified()) {
+            if (!saveDocument(i)) {
+                allSuccess = false;
+                break;
+            }
+        }
+    }
+    return allSuccess;
+}
+
+bool MainWindow::onSave() {
+    return saveDocument(m_activeDocIndex);
+}
+
+bool MainWindow::onSaveAs() {
+    return saveDocumentAs(m_activeDocIndex);
+}
+
+bool MainWindow::onSaveAll() {
+    return saveAllDocuments();
+}
+
 void MainWindow::onClose() {
-    newDocument(800, 600);
+    closeActiveDocument();
+}
+
+void MainWindow::onCloseAll() {
+    closeAllDocuments();
 }
 
 void MainWindow::onCut() {
@@ -331,7 +639,6 @@ void MainWindow::onCut() {
 
     onCopy();
     onEraseSelection();
-    // Requirement 1: When I cut something, the selection should disappear.
     m_doc->clearSelection();
 }
 
@@ -401,29 +708,21 @@ void MainWindow::onPaste() {
     QImage img = qvariant_cast<QImage>(clipboard->image());
     if (img.isNull()) return;
 
-    // Requirement 4: When something is cut or copied, the position and size should be saved.
-    // When the next paste contains an image, with the same size as the previous cut/copy,
-    // then it should be pasted at that exact position.
     QPoint pastePos(0, 0);
     if (s_hasLastCopied && img.size() == s_lastCopiedSize) {
         pastePos = s_lastCopiedPos;
     }
 
-    // Switch tool to MoveSelectedPixels first
     if (m_toolMgr) {
         m_toolMgr->setActiveTool(ToolType::MoveSelectedPixels);
     }
 
-    // Bake any existing floating selection before starting new paste
     if (m_doc->hasFloatingSelection()) {
         m_doc->bakeFloatingSelection();
     }
 
-    // Requirement 3: Paste creates a hidden temporary layer (floating selection)
-    // with isLifted = false so the layer underneath is NOT punched with a hole!
     m_doc->createFloatingSelection(img, pastePos, false, "Paste");
 
-    // Requirement 2: When I paste something, it should have a selection around the pasted content.
     m_doc->selection().clear();
     m_doc->selection().addRect(QRectF(pastePos, img.size()), SelectionCombineMode::Replace);
     emit m_doc->selectionChanged();
@@ -592,6 +891,7 @@ void MainWindow::onAbout() {
         "<p>Cross-platform Paint.NET clone written in C++ with Qt 6 and native Vulkan GPU rendering.</p>"
         "<p>Features:"
         "<ul>"
+        "<li>Multiple images / documents in one window with thumbnail strip</li>"
         "<li>PDN3 format reader/writer (100% Paint.NET compatible)</li>"
         "<li>PNG, JPG, BMP, GIF, WebP support</li>"
         "<li>19 Paint.NET tools with options toolbar</li>"
@@ -606,9 +906,57 @@ void MainWindow::onAbout() {
         "</p>");
 }
 
+void MainWindow::closeEvent(QCloseEvent* event) {
+    for (int i = m_documents.size() - 1; i >= 0; --i) {
+        if (!maybeSaveDocument(i)) {
+            event->ignore();
+            return;
+        }
+    }
+    event->accept();
+}
+
+void MainWindow::dragEnterEvent(QDragEnterEvent* event) {
+    if (event->mimeData()->hasUrls()) {
+        event->acceptProposedAction();
+    } else {
+        QMainWindow::dragEnterEvent(event);
+    }
+}
+
+void MainWindow::dropEvent(QDropEvent* event) {
+    const auto urls = event->mimeData()->urls();
+    for (const QUrl& url : urls) {
+        if (url.isLocalFile()) {
+            openFile(url.toLocalFile());
+        }
+    }
+    event->acceptProposedAction();
+}
+
 bool MainWindow::eventFilter(QObject* watched, QEvent* event) {
     if (event->type() == QEvent::KeyPress) {
         QKeyEvent* keyEvent = static_cast<QKeyEvent*>(event);
+
+        // Document navigation shortcuts: Ctrl+Tab / Ctrl+Shift+Tab / Ctrl+PageDown / Ctrl+PageUp
+        if (keyEvent->modifiers() & Qt::ControlModifier) {
+            if (keyEvent->key() == Qt::Key_Tab || keyEvent->key() == Qt::Key_PageDown) {
+                if (keyEvent->modifiers() & Qt::ShiftModifier) {
+                    previousDocument();
+                } else {
+                    nextDocument();
+                }
+                return true;
+            }
+            if (keyEvent->key() == Qt::Key_Backtab || keyEvent->key() == Qt::Key_PageUp) {
+                previousDocument();
+                return true;
+            }
+            if (keyEvent->key() == Qt::Key_W || keyEvent->key() == Qt::Key_F4) {
+                closeActiveDocument();
+                return true;
+            }
+        }
 
         // 1. If focus is inside a text input widget or line edit, allow standard typing
         QWidget* fw = QApplication::focusWidget();

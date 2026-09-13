@@ -10,9 +10,9 @@ int main(int argc, char* argv[]) {
     pdn::MainWindow window;
     window.show();
 
-    // If an image / pdn file was provided as a command line argument, open it!
-    if (argc > 1) {
-        QString filePath = QString::fromLocal8Bit(argv[1]);
+    // If image / pdn files were provided as command line arguments, open them!
+    for (int i = 1; i < argc; ++i) {
+        QString filePath = QString::fromLocal8Bit(argv[i]);
         window.openFile(filePath);
     }
 

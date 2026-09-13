@@ -53,6 +53,18 @@ std::shared_ptr<ITool> ToolManager::activeTool() const {
     return tool(m_activeToolType);
 }
 
+void ToolManager::setDocument(Document* doc) {
+    if (m_document == doc) return;
+    auto tool = activeTool();
+    if (tool && m_document) {
+        tool->deactivate(m_document, m_context);
+    }
+    m_document = doc;
+    if (tool && m_document) {
+        tool->activate(m_document, m_context);
+    }
+}
+
 void ToolManager::setActiveTool(ToolType type, Document* doc) {
     if (!doc) {
         doc = m_document;

@@ -49,6 +49,13 @@ CanvasView::CanvasView(ToolManager* toolMgr, QWidget* parent)
 }
 
 void CanvasView::setDocument(std::shared_ptr<Document> doc) {
+    if (m_doc == doc) return;
+
+    if (m_doc) {
+        m_viewStates[m_doc.get()] = m_renderOpts;
+        disconnect(m_doc.get(), nullptr, this, nullptr);
+    }
+
     m_doc = doc;
     if (m_doc) {
         m_toolMgr->setDocument(m_doc.get());
@@ -57,9 +64,21 @@ void CanvasView::setDocument(std::shared_ptr<Document> doc) {
             update();
         });
         connect(m_doc.get(), &Document::selectionChanged, this, QOverload<>::of(&CanvasView::update));
-        zoomToWindow();
+
+        if (m_viewStates.contains(m_doc.get())) {
+            m_renderOpts = m_viewStates[m_doc.get()];
+            m_renderOpts.panOffset = clampPanOffset(m_renderOpts.panOffset);
+            emit zoomChanged(m_renderOpts.zoom);
+        } else {
+            zoomToWindow();
+            m_viewStates[m_doc.get()] = m_renderOpts;
+        }
     }
     update();
+}
+
+void CanvasView::removeDocumentViewState(const Document* doc) {
+    m_viewStates.remove(doc);
 }
 
 QPointF CanvasView::viewportToDoc(const QPointF& vpPos) const {

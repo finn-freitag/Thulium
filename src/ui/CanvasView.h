@@ -2,6 +2,7 @@
 
 #include <QWidget>
 #include <QTimer>
+#include <QMap>
 #include <memory>
 #include "../core/Document.h"
 #include "../rendering/IRenderer.h"
@@ -35,6 +36,8 @@ public:
     QPointF viewportToDoc(const QPointF& vpPos) const;
     QPointF docToViewport(const QPointF& docPos) const;
 
+    void removeDocumentViewState(const Document* doc);
+
     IRenderer* renderer() { return m_renderer.get(); }
 
 signals:
@@ -58,6 +61,7 @@ private:
     ToolManager* m_toolMgr;
     std::unique_ptr<IRenderer> m_renderer;
     RenderOptions m_renderOpts;
+    QMap<const Document*, RenderOptions> m_viewStates;
 
     QTimer m_marchingAntsTimer;
     bool m_spacePanning = false;
