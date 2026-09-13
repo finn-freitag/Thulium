@@ -49,6 +49,7 @@ MainWindow::MainWindow(QWidget* parent)
 }
 
 void MainWindow::newDocument(int width, int height) {
+    clearLastCopied();
     m_doc = std::make_shared<Document>(width, height);
     m_toolMgr->setDocument(m_doc.get());
     m_canvasView->setDocument(m_doc);
@@ -68,6 +69,7 @@ bool MainWindow::openFile(const QString& filePath) {
         return false;
     }
 
+    clearLastCopied();
     m_doc = doc;
     m_toolMgr->setDocument(m_doc.get());
     m_canvasView->setDocument(m_doc);

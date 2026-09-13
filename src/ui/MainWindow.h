@@ -30,6 +30,11 @@ public:
     static QPoint lastCopiedPos() { return s_lastCopiedPos; }
     static QSize lastCopiedSize() { return s_lastCopiedSize; }
     static bool hasLastCopied() { return s_hasLastCopied; }
+    static void clearLastCopied() {
+        s_lastCopiedPos = QPoint(0, 0);
+        s_lastCopiedSize = QSize(0, 0);
+        s_hasLastCopied = false;
+    }
 
 private slots:
     // File

@@ -691,7 +691,30 @@ int main(int argc, char* argv[]) {
         assert(!doc->hasFloatingSelection());
         assert(layer->scanLine(5)[5] == 0xFFFF0000); // Red baked at (0, 0)
 
-        std::cout << "  Passed: Copy/Cut/Paste, position persistence, selection bounds, and floating temporary layer all work properly!" << std::endl;
+        // 8. Test New Document clears cut size and position data:
+        // Cut a rect at (40, 50) of size (60, 70)
+        doc->selection().addRect(QRectF(40, 50, 60, 70), pdn::SelectionCombineMode::Replace);
+        QMetaObject::invokeMethod(&win, "onCut");
+        assert(pdn::MainWindow::hasLastCopied());
+        assert(pdn::MainWindow::lastCopiedPos() == QPoint(40, 50));
+        assert(pdn::MainWindow::lastCopiedSize() == QSize(60, 70));
+
+        // Create a new document
+        win.newDocument(400, 400);
+        assert(!pdn::MainWindow::hasLastCopied());
+        assert(pdn::MainWindow::lastCopiedPos() == QPoint(0, 0));
+        assert(pdn::MainWindow::lastCopiedSize() == QSize(0, 0));
+
+        // Now paste on the new document: even though the clipboard still has the cut image (60x70),
+        // it must paste at (0, 0) because the new file was created!
+        auto newDoc = win.document();
+        assert(newDoc != nullptr);
+        QMetaObject::invokeMethod(&win, "onPaste");
+        assert(newDoc->hasFloatingSelection());
+        assert(newDoc->floatingOffset() == QPointF(0, 0));
+        assert(newDoc->selection().boundingRect() == QRectF(0, 0, 60, 70));
+
+        std::cout << "  Passed: Copy/Cut/Paste, position persistence, selection bounds, new document clearing, and floating temporary layer all work properly!" << std::endl;
     }
 
     // Test 11: Move Tool Resize and Rotate (Paint.NET behavior)

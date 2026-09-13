@@ -213,7 +213,7 @@ Qt::Alignment CanvasSizeDialog::anchor() const {
 // --- NewImageDialog ---
 NewImageDialog::NewImageDialog(QWidget* parent) : QDialog(parent) {
     setWindowTitle("New");
-    setFixedSize(300, 200);
+    setFixedSize(400, 220);
 
     QVBoxLayout* mainLayout = new QVBoxLayout(this);
     QFormLayout* form = new QFormLayout();
@@ -225,15 +225,31 @@ NewImageDialog::NewImageDialog(QWidget* parent) : QDialog(parent) {
     m_presetCombo->addItem("1920 x 1080 (Full HD)", QSize(1920, 1080));
     m_presetCombo->addItem("2560 x 1440 (2K QHD)", QSize(2560, 1440));
     m_presetCombo->addItem("3840 x 2160 (4K UHD)", QSize(3840, 2160));
+    m_presetCombo->addItem("A4 Portrait (Print 300 DPI: 2480 x 3508)", QSize(2480, 3508));
+    m_presetCombo->addItem("A4 Landscape (Print 300 DPI: 3508 x 2480)", QSize(3508, 2480));
+    m_presetCombo->addItem("A4 Portrait (Screen 96 DPI: 794 x 1123)", QSize(794, 1123));
+    m_presetCombo->addItem("A4 Landscape (Screen 96 DPI: 1123 x 794)", QSize(1123, 794));
+    m_presetCombo->addItem("Letter Portrait (Print 300 DPI: 2550 x 3300)", QSize(2550, 3300));
+    m_presetCombo->addItem("Letter Landscape (Print 300 DPI: 3300 x 2550)", QSize(3300, 2550));
+    m_presetCombo->addItem("Letter Portrait (Screen 96 DPI: 816 x 1056)", QSize(816, 1056));
+    m_presetCombo->addItem("Letter Landscape (Screen 96 DPI: 1056 x 816)", QSize(1056, 816));
+
+    int initW = 800;
+    int initH = 600;
+    int selectIndex = 1; // Default to first preset if no clipboard
 
     // Check clipboard for image
-    const QClipboard* clipboard = QGuiApplication::clipboard();
-    const QMimeData* mimeData = clipboard->mimeData();
-    if (mimeData && mimeData->hasImage()) {
-        QImage clipImg = qvariant_cast<QImage>(clipboard->image());
-        if (!clipImg.isNull()) {
-            m_presetCombo->insertItem(1, QString("Clipboard (%1 x %2)").arg(clipImg.width()).arg(clipImg.height()), clipImg.size());
-            m_presetCombo->setCurrentIndex(1);
+    QClipboard* clipboard = QGuiApplication::clipboard();
+    if (clipboard) {
+        QImage clipImg = clipboard->image();
+        if (clipImg.isNull() && clipboard->mimeData() && clipboard->mimeData()->hasImage()) {
+            clipImg = qvariant_cast<QImage>(clipboard->mimeData()->imageData());
+        }
+        if (!clipImg.isNull() && clipImg.width() > 0 && clipImg.height() > 0) {
+            initW = clipImg.width();
+            initH = clipImg.height();
+            m_presetCombo->insertItem(1, QString("Clipboard (%1 x %2)").arg(initW).arg(initH), clipImg.size());
+            selectIndex = 1;
         }
     }
 
@@ -241,16 +257,32 @@ NewImageDialog::NewImageDialog(QWidget* parent) : QDialog(parent) {
 
     m_widthSpin = new QSpinBox(this);
     m_widthSpin->setRange(1, 32768);
-    m_widthSpin->setValue(800);
+    m_widthSpin->setValue(initW);
 
     m_heightSpin = new QSpinBox(this);
     m_heightSpin->setRange(1, 32768);
-    m_heightSpin->setValue(600);
+    m_heightSpin->setValue(initH);
 
     form->addRow("Width (pixels):", m_widthSpin);
     form->addRow("Height (pixels):", m_heightSpin);
 
+    m_presetCombo->setCurrentIndex(selectIndex);
+
     connect(m_presetCombo, QOverload<int>::of(&QComboBox::currentIndexChanged), this, &NewImageDialog::onPresetChanged);
+
+    auto onSpinChanged = [this]() {
+        QVariant data = m_presetCombo->itemData(m_presetCombo->currentIndex());
+        if (data.isValid()) {
+            QSize sz = data.toSize();
+            if (m_widthSpin->value() != sz.width() || m_heightSpin->value() != sz.height()) {
+                m_presetCombo->blockSignals(true);
+                m_presetCombo->setCurrentIndex(0); // Custom
+                m_presetCombo->blockSignals(false);
+            }
+        }
+    };
+    connect(m_widthSpin, QOverload<int>::of(&QSpinBox::valueChanged), this, onSpinChanged);
+    connect(m_heightSpin, QOverload<int>::of(&QSpinBox::valueChanged), this, onSpinChanged);
 
     mainLayout->addLayout(form);
 

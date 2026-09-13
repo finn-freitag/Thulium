@@ -1,6 +1,8 @@
 #include <iostream>
 #include <cassert>
 #include <QApplication>
+#include <QComboBox>
+#include <QClipboard>
 #include "../src/core/Document.h"
 #include "../src/core/Resampling.h"
 #include "../src/ui/Dialogs.h"
@@ -428,6 +430,79 @@ int main(int argc, char* argv[]) {
         pencil.mouseRelease(&releaseEvent, doc.get(), QPointF(12.8, 20.9), ctx);
 
         std::cout << "  Passed: Pencil tool precisely paints targeted pixels without 0.5px offset!" << std::endl;
+    }
+
+    std::cout << "Test 12: NewImageDialog presets (A4, Letter) and clipboard image detection..." << std::endl;
+    {
+        // 1. Clear clipboard first to test standard presets
+        QGuiApplication::clipboard()->clear();
+
+        pdn::NewImageDialog dlgDefault;
+        // Default size should be 800 x 600
+        assert(dlgDefault.imageWidth() == 800);
+        assert(dlgDefault.imageHeight() == 600);
+
+        // Check presets combo
+        QComboBox* combo = dlgDefault.findChild<QComboBox*>();
+        assert(combo != nullptr);
+
+        // Find A4 Print Portrait
+        int a4Index = combo->findText("A4 Portrait (Print 300 DPI: 2480 x 3508)");
+        assert(a4Index != -1);
+        combo->setCurrentIndex(a4Index);
+        assert(dlgDefault.imageWidth() == 2480);
+        assert(dlgDefault.imageHeight() == 3508);
+
+        // Find A4 Print Landscape
+        int a4LandIndex = combo->findText("A4 Landscape (Print 300 DPI: 3508 x 2480)");
+        assert(a4LandIndex != -1);
+        combo->setCurrentIndex(a4LandIndex);
+        assert(dlgDefault.imageWidth() == 3508);
+        assert(dlgDefault.imageHeight() == 2480);
+
+        // Find Letter Print Portrait
+        int letterIndex = combo->findText("Letter Portrait (Print 300 DPI: 2550 x 3300)");
+        assert(letterIndex != -1);
+        combo->setCurrentIndex(letterIndex);
+        assert(dlgDefault.imageWidth() == 2550);
+        assert(dlgDefault.imageHeight() == 3300);
+
+        // Find Letter Print Landscape
+        int letterLandIndex = combo->findText("Letter Landscape (Print 300 DPI: 3300 x 2550)");
+        assert(letterLandIndex != -1);
+        combo->setCurrentIndex(letterLandIndex);
+        assert(dlgDefault.imageWidth() == 3300);
+        assert(dlgDefault.imageHeight() == 2550);
+
+        // Find A4 Screen Portrait
+        int a4ScreenIndex = combo->findText("A4 Portrait (Screen 96 DPI: 794 x 1123)");
+        assert(a4ScreenIndex != -1);
+        combo->setCurrentIndex(a4ScreenIndex);
+        assert(dlgDefault.imageWidth() == 794);
+        assert(dlgDefault.imageHeight() == 1123);
+
+        // Find Letter Screen Portrait
+        int letterScreenIndex = combo->findText("Letter Portrait (Screen 96 DPI: 816 x 1056)");
+        assert(letterScreenIndex != -1);
+        combo->setCurrentIndex(letterScreenIndex);
+        assert(dlgDefault.imageWidth() == 816);
+        assert(dlgDefault.imageHeight() == 1056);
+
+        // 2. Test Clipboard auto-sizing
+        QImage clipTest(456, 789, QImage::Format_ARGB32_Premultiplied);
+        clipTest.fill(Qt::blue);
+        QGuiApplication::clipboard()->setImage(clipTest);
+
+        pdn::NewImageDialog dlgClip;
+        assert(dlgClip.imageWidth() == 456);
+        assert(dlgClip.imageHeight() == 789);
+
+        // Verify "Clipboard (456 x 789)" is selected
+        QComboBox* clipCombo = dlgClip.findChild<QComboBox*>();
+        assert(clipCombo != nullptr);
+        assert(clipCombo->currentText().contains("Clipboard (456 x 789)"));
+
+        std::cout << "  Passed: NewImageDialog presets and clipboard detection work flawlessly!" << std::endl;
     }
 
     std::cout << "\nALL IMAGE OPERATIONS AND RESAMPLING TESTS PASSED SUCCESSFULLY!" << std::endl;
