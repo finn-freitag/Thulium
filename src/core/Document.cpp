@@ -316,11 +316,38 @@ void Document::clearSelection() {
     emit documentChanged();
 }
 
-void Document::resizeCanvas(int newWidth, int newHeight, Qt::Alignment anchor) {
+void Document::setDocumentDimensions(int width, int height) {
+    m_width = width;
+    m_height = height;
+}
+
+void Document::setLayers(const QList<std::shared_ptr<Layer>>& layers, int activeIndex) {
+    if (m_hasFloatingSelection) {
+        bakeFloatingSelection();
+    }
+    m_layers = layers;
+    m_activeLayerIndex = std::clamp(activeIndex, 0, std::max(0, static_cast<int>(m_layers.size()) - 1));
+    emit layerCountChanged();
+    emit activeLayerChanged(m_activeLayerIndex);
+    emit documentChanged();
+}
+
+void Document::resizeCanvas(int newWidth, int newHeight, Qt::Alignment anchor, bool recordUndo) {
     if (newWidth <= 0 || newHeight <= 0) return;
     if (m_hasFloatingSelection) {
         bakeFloatingSelection();
     }
+
+    int oldW = m_width;
+    int oldH = m_height;
+    QPainterPath oldSel = m_selection.path();
+    QList<QImage> oldImgs;
+    if (recordUndo) {
+        for (const auto& l : m_layers) {
+            oldImgs.append(l->image().copy());
+        }
+    }
+
     int dx = 0;
     int dy = 0;
 
@@ -348,29 +375,78 @@ void Document::resizeCanvas(int newWidth, int newHeight, Qt::Alignment anchor) {
     m_width = newWidth;
     m_height = newHeight;
     m_selection.clear();
+    emit selectionChanged();
     emit documentChanged();
+
+    if (recordUndo) {
+        QList<QImage> newImgs;
+        for (const auto& l : m_layers) {
+            newImgs.append(l->image().copy());
+        }
+        m_undoStack.push(new ImageGeometryUndoCommand(this, oldW, oldH, oldImgs, oldSel,
+                                                     m_width, m_height, newImgs, m_selection.path(),
+                                                     "Canvas Size"));
+    }
 }
 
-void Document::resizeImage(int newWidth, int newHeight, Qt::TransformationMode mode) {
+void Document::resizeImage(int newWidth, int newHeight, ResampleAlgorithm algo, bool recordUndo) {
     if (newWidth <= 0 || newHeight <= 0) return;
     if (m_hasFloatingSelection) {
         bakeFloatingSelection();
     }
+
+    int oldW = m_width;
+    int oldH = m_height;
+    QPainterPath oldSel = m_selection.path();
+    QList<QImage> oldImgs;
+    if (recordUndo) {
+        for (const auto& l : m_layers) {
+            oldImgs.append(l->image().copy());
+        }
+    }
+
     for (auto& l : m_layers) {
-        l->setImage(l->image().scaled(newWidth, newHeight, Qt::IgnoreAspectRatio, mode));
+        l->setImage(Resampling::resample(l->image(), newWidth, newHeight, algo));
     }
     m_width = newWidth;
     m_height = newHeight;
     m_selection.clear();
+    emit selectionChanged();
     emit documentChanged();
+
+    if (recordUndo) {
+        QList<QImage> newImgs;
+        for (const auto& l : m_layers) {
+            newImgs.append(l->image().copy());
+        }
+        m_undoStack.push(new ImageGeometryUndoCommand(this, oldW, oldH, oldImgs, oldSel,
+                                                     m_width, m_height, newImgs, m_selection.path(),
+                                                     "Resize"));
+    }
 }
 
-void Document::crop(const QRect& rect) {
+void Document::resizeImage(int newWidth, int newHeight, Qt::TransformationMode mode) {
+    resizeImage(newWidth, newHeight,
+                (mode == Qt::FastTransformation ? ResampleAlgorithm::NearestNeighbor : ResampleAlgorithm::Bilinear),
+                true);
+}
+
+void Document::crop(const QRect& rect, bool recordUndo) {
     if (m_hasFloatingSelection) {
         bakeFloatingSelection();
     }
     QRect validRect = rect.intersected(QRect(0, 0, m_width, m_height));
     if (validRect.isEmpty()) return;
+
+    int oldW = m_width;
+    int oldH = m_height;
+    QPainterPath oldSel = m_selection.path();
+    QList<QImage> oldImgs;
+    if (recordUndo) {
+        for (const auto& l : m_layers) {
+            oldImgs.append(l->image().copy());
+        }
+    }
 
     for (auto& l : m_layers) {
         l->crop(validRect);
@@ -378,58 +454,180 @@ void Document::crop(const QRect& rect) {
     m_width = validRect.width();
     m_height = validRect.height();
     m_selection.clear();
+    emit selectionChanged();
     emit documentChanged();
+
+    if (recordUndo) {
+        QList<QImage> newImgs;
+        for (const auto& l : m_layers) {
+            newImgs.append(l->image().copy());
+        }
+        m_undoStack.push(new ImageGeometryUndoCommand(this, oldW, oldH, oldImgs, oldSel,
+                                                     m_width, m_height, newImgs, m_selection.path(),
+                                                     "Crop to Selection"));
+    }
 }
 
-void Document::flipHorizontal() {
+void Document::flipHorizontal(bool recordUndo) {
     if (m_hasFloatingSelection) {
         bakeFloatingSelection();
     }
+
+    int oldW = m_width;
+    int oldH = m_height;
+    QPainterPath oldSel = m_selection.path();
+    QList<QImage> oldImgs;
+    if (recordUndo) {
+        for (const auto& l : m_layers) {
+            oldImgs.append(l->image().copy());
+        }
+    }
+
     for (auto& l : m_layers) l->flipHorizontal();
     emit documentChanged();
+
+    if (recordUndo) {
+        QList<QImage> newImgs;
+        for (const auto& l : m_layers) {
+            newImgs.append(l->image().copy());
+        }
+        m_undoStack.push(new ImageGeometryUndoCommand(this, oldW, oldH, oldImgs, oldSel,
+                                                     m_width, m_height, newImgs, m_selection.path(),
+                                                     "Flip Horizontal"));
+    }
 }
 
-void Document::flipVertical() {
+void Document::flipVertical(bool recordUndo) {
     if (m_hasFloatingSelection) {
         bakeFloatingSelection();
     }
+
+    int oldW = m_width;
+    int oldH = m_height;
+    QPainterPath oldSel = m_selection.path();
+    QList<QImage> oldImgs;
+    if (recordUndo) {
+        for (const auto& l : m_layers) {
+            oldImgs.append(l->image().copy());
+        }
+    }
+
     for (auto& l : m_layers) l->flipVertical();
     emit documentChanged();
+
+    if (recordUndo) {
+        QList<QImage> newImgs;
+        for (const auto& l : m_layers) {
+            newImgs.append(l->image().copy());
+        }
+        m_undoStack.push(new ImageGeometryUndoCommand(this, oldW, oldH, oldImgs, oldSel,
+                                                     m_width, m_height, newImgs, m_selection.path(),
+                                                     "Flip Vertical"));
+    }
 }
 
-void Document::rotate90CW() {
+void Document::rotate90CW(bool recordUndo) {
     if (m_hasFloatingSelection) {
         bakeFloatingSelection();
     }
+
+    int oldW = m_width;
+    int oldH = m_height;
+    QPainterPath oldSel = m_selection.path();
+    QList<QImage> oldImgs;
+    if (recordUndo) {
+        for (const auto& l : m_layers) {
+            oldImgs.append(l->image().copy());
+        }
+    }
+
     for (auto& l : m_layers) l->rotate90CW();
     std::swap(m_width, m_height);
     m_selection.clear();
+    emit selectionChanged();
     emit documentChanged();
+
+    if (recordUndo) {
+        QList<QImage> newImgs;
+        for (const auto& l : m_layers) {
+            newImgs.append(l->image().copy());
+        }
+        m_undoStack.push(new ImageGeometryUndoCommand(this, oldW, oldH, oldImgs, oldSel,
+                                                     m_width, m_height, newImgs, m_selection.path(),
+                                                     "Rotate 90° Clockwise"));
+    }
 }
 
-void Document::rotate90CCW() {
+void Document::rotate90CCW(bool recordUndo) {
     if (m_hasFloatingSelection) {
         bakeFloatingSelection();
     }
+
+    int oldW = m_width;
+    int oldH = m_height;
+    QPainterPath oldSel = m_selection.path();
+    QList<QImage> oldImgs;
+    if (recordUndo) {
+        for (const auto& l : m_layers) {
+            oldImgs.append(l->image().copy());
+        }
+    }
+
     for (auto& l : m_layers) l->rotate90CCW();
     std::swap(m_width, m_height);
     m_selection.clear();
+    emit selectionChanged();
     emit documentChanged();
+
+    if (recordUndo) {
+        QList<QImage> newImgs;
+        for (const auto& l : m_layers) {
+            newImgs.append(l->image().copy());
+        }
+        m_undoStack.push(new ImageGeometryUndoCommand(this, oldW, oldH, oldImgs, oldSel,
+                                                     m_width, m_height, newImgs, m_selection.path(),
+                                                     "Rotate 90° Counter-Clockwise"));
+    }
 }
 
-void Document::rotate180() {
+void Document::rotate180(bool recordUndo) {
     if (m_hasFloatingSelection) {
         bakeFloatingSelection();
     }
+
+    int oldW = m_width;
+    int oldH = m_height;
+    QPainterPath oldSel = m_selection.path();
+    QList<QImage> oldImgs;
+    if (recordUndo) {
+        for (const auto& l : m_layers) {
+            oldImgs.append(l->image().copy());
+        }
+    }
+
     for (auto& l : m_layers) l->rotate180();
     emit documentChanged();
+
+    if (recordUndo) {
+        QList<QImage> newImgs;
+        for (const auto& l : m_layers) {
+            newImgs.append(l->image().copy());
+        }
+        m_undoStack.push(new ImageGeometryUndoCommand(this, oldW, oldH, oldImgs, oldSel,
+                                                     m_width, m_height, newImgs, m_selection.path(),
+                                                     "Rotate 180°"));
+    }
 }
 
-void Document::flatten() {
+void Document::flatten(bool recordUndo) {
     if (m_layers.size() <= 1 && !m_hasFloatingSelection) return;
     if (m_hasFloatingSelection) {
         bakeFloatingSelection();
     }
+
+    QList<std::shared_ptr<Layer>> oldLayers = m_layers;
+    int oldActiveIndex = m_activeLayerIndex;
+
     QImage compositeImage = composite();
     m_layers.clear();
     auto flat = std::make_shared<Layer>(compositeImage, "Background", true);
@@ -438,6 +636,10 @@ void Document::flatten() {
     emit layerCountChanged();
     emit activeLayerChanged(0);
     emit documentChanged();
+
+    if (recordUndo) {
+        m_undoStack.push(new FlattenUndoCommand(this, oldLayers, oldActiveIndex, m_layers, 0, "Flatten Image"));
+    }
 }
 
 QImage Document::composite() const {

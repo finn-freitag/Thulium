@@ -48,6 +48,7 @@ public:
 
     int newWidth() const;
     int newHeight() const;
+    ResampleAlgorithm algorithm() const;
 
 private slots:
     void onWidthChanged(int w);
@@ -61,6 +62,7 @@ private:
     QSpinBox* m_widthSpin;
     QSpinBox* m_heightSpin;
     QCheckBox* m_maintainAspectCheck;
+    QComboBox* m_resampleCombo;
     bool m_updating = false;
 };
 

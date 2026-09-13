@@ -90,7 +90,7 @@ void LayerPropertiesDialog::applyChanges() {
 ResizeImageDialog::ResizeImageDialog(int currentWidth, int currentHeight, QWidget* parent)
     : QDialog(parent), m_origWidth(currentWidth), m_origHeight(currentHeight) {
     setWindowTitle("Resize");
-    setFixedSize(300, 180);
+    setFixedSize(320, 210);
     m_aspectRatio = static_cast<double>(m_origWidth) / m_origHeight;
 
     QVBoxLayout* mainLayout = new QVBoxLayout(this);
@@ -111,6 +111,15 @@ ResizeImageDialog::ResizeImageDialog(int currentWidth, int currentHeight, QWidge
     m_maintainAspectCheck->setChecked(true);
     form->addRow("", m_maintainAspectCheck);
 
+    m_resampleCombo = new QComboBox(this);
+    m_resampleCombo->addItem("Nearest Neighbor", static_cast<int>(ResampleAlgorithm::NearestNeighbor));
+    m_resampleCombo->addItem("Bilinear", static_cast<int>(ResampleAlgorithm::Bilinear));
+    m_resampleCombo->addItem("Bicubic", static_cast<int>(ResampleAlgorithm::Bicubic));
+    m_resampleCombo->addItem("Lanczos", static_cast<int>(ResampleAlgorithm::Lanczos));
+    m_resampleCombo->addItem("Super Sampling (Box)", static_cast<int>(ResampleAlgorithm::SuperSampling));
+    m_resampleCombo->setCurrentIndex(2); // Bicubic by default
+    form->addRow("Resampling:", m_resampleCombo);
+
     connect(m_widthSpin, QOverload<int>::of(&QSpinBox::valueChanged), this, &ResizeImageDialog::onWidthChanged);
     connect(m_heightSpin, QOverload<int>::of(&QSpinBox::valueChanged), this, &ResizeImageDialog::onHeightChanged);
 
@@ -124,6 +133,9 @@ ResizeImageDialog::ResizeImageDialog(int currentWidth, int currentHeight, QWidge
 
 int ResizeImageDialog::newWidth() const { return m_widthSpin->value(); }
 int ResizeImageDialog::newHeight() const { return m_heightSpin->value(); }
+ResampleAlgorithm ResizeImageDialog::algorithm() const {
+    return static_cast<ResampleAlgorithm>(m_resampleCombo->currentData().toInt());
+}
 
 void ResizeImageDialog::onWidthChanged(int w) {
     if (m_updating || !m_maintainAspectCheck->isChecked()) return;

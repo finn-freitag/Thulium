@@ -7,6 +7,7 @@
 #include <memory>
 #include "Layer.h"
 #include "Selection.h"
+#include "Resampling.h"
 
 namespace pdn {
 
@@ -67,15 +68,19 @@ public:
     void discardFloatingSelection();
 
     // Canvas / Image transformation
-    void resizeCanvas(int newWidth, int newHeight, Qt::Alignment anchor = Qt::AlignCenter);
-    void resizeImage(int newWidth, int newHeight, Qt::TransformationMode mode = Qt::SmoothTransformation);
-    void crop(const QRect& rect);
-    void flipHorizontal();
-    void flipVertical();
-    void rotate90CW();
-    void rotate90CCW();
-    void rotate180();
-    void flatten();
+    void resizeCanvas(int newWidth, int newHeight, Qt::Alignment anchor = Qt::AlignCenter, bool recordUndo = true);
+    void resizeImage(int newWidth, int newHeight, ResampleAlgorithm algo = ResampleAlgorithm::Bicubic, bool recordUndo = true);
+    void resizeImage(int newWidth, int newHeight, Qt::TransformationMode mode);
+    void crop(const QRect& rect, bool recordUndo = true);
+    void flipHorizontal(bool recordUndo = true);
+    void flipVertical(bool recordUndo = true);
+    void rotate90CW(bool recordUndo = true);
+    void rotate90CCW(bool recordUndo = true);
+    void rotate180(bool recordUndo = true);
+    void flatten(bool recordUndo = true);
+
+    void setDocumentDimensions(int width, int height);
+    void setLayers(const QList<std::shared_ptr<Layer>>& layers, int activeIndex);
 
     // Composite all visible layers into a single QImage
     QImage composite() const;

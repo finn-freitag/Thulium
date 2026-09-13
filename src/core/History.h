@@ -71,4 +71,52 @@ private:
     bool m_oldVisible, m_newVisible;
 };
 
+class ImageGeometryUndoCommand : public QUndoCommand {
+public:
+    ImageGeometryUndoCommand(Document* doc,
+                            int oldWidth, int oldHeight,
+                            const QList<QImage>& oldImages,
+                            const QPainterPath& oldSelectionPath,
+                            int newWidth, int newHeight,
+                            const QList<QImage>& newImages,
+                            const QPainterPath& newSelectionPath,
+                            const QString& text);
+
+    void undo() override;
+    void redo() override;
+
+private:
+    Document* m_doc;
+    int m_oldWidth;
+    int m_oldHeight;
+    QList<QImage> m_oldImages;
+    QPainterPath m_oldSelectionPath;
+    int m_newWidth;
+    int m_newHeight;
+    QList<QImage> m_newImages;
+    QPainterPath m_newSelectionPath;
+    bool m_firstRedo = true;
+};
+
+class FlattenUndoCommand : public QUndoCommand {
+public:
+    FlattenUndoCommand(Document* doc,
+                      const QList<std::shared_ptr<Layer>>& oldLayers,
+                      int oldActiveIndex,
+                      const QList<std::shared_ptr<Layer>>& newLayers,
+                      int newActiveIndex,
+                      const QString& text = "Flatten Image");
+
+    void undo() override;
+    void redo() override;
+
+private:
+    Document* m_doc;
+    QList<std::shared_ptr<Layer>> m_oldLayers;
+    int m_oldActiveIndex;
+    QList<std::shared_ptr<Layer>> m_newLayers;
+    int m_newActiveIndex;
+    bool m_firstRedo = true;
+};
+
 } // namespace pdn

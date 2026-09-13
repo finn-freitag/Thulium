@@ -87,6 +87,9 @@ void MainWindow::updateTitle() {
         if (m_doc->isModified()) {
             title += "*";
         }
+        if (m_statusWidget) {
+            m_statusWidget->setDocumentSize(m_doc->width(), m_doc->height());
+        }
     } else {
         title += "Untitled";
     }
@@ -530,7 +533,7 @@ void MainWindow::onResizeImage() {
     if (!m_doc) return;
     ResizeImageDialog dlg(m_doc->width(), m_doc->height(), this);
     if (dlg.exec() == QDialog::Accepted) {
-        m_doc->resizeImage(dlg.newWidth(), dlg.newHeight());
+        m_doc->resizeImage(dlg.newWidth(), dlg.newHeight(), dlg.algorithm());
         m_statusWidget->setDocumentSize(m_doc->width(), m_doc->height());
     }
 }

@@ -33,6 +33,8 @@ set(PDN_SOURCES
     src/core/Document.cpp
     src/core/History.h
     src/core/History.cpp
+    src/core/Resampling.h
+    src/core/Resampling.cpp
 
     src/io/PdnFormat.h
     src/io/PdnFormat.cpp
@@ -135,4 +137,8 @@ add_test(NAME test_formats COMMAND test_formats)
 add_executable(test_fixes tests/test_fixes.cpp)
 target_link_libraries(test_fixes PRIVATE pdn_core)
 add_test(NAME test_fixes COMMAND test_fixes)
+
+add_executable(test_image_operations tests/test_image_operations.cpp)
+target_link_libraries(test_image_operations PRIVATE pdn_core)
+add_test(NAME test_image_operations COMMAND test_image_operations)
 

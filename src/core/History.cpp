@@ -102,4 +102,64 @@ void LayerPropertyUndoCommand::redo() {
     }
 }
 
+ImageGeometryUndoCommand::ImageGeometryUndoCommand(Document* doc,
+                                                   int oldWidth, int oldHeight,
+                                                   const QList<QImage>& oldImages,
+                                                   const QPainterPath& oldSelectionPath,
+                                                   int newWidth, int newHeight,
+                                                   const QList<QImage>& newImages,
+                                                   const QPainterPath& newSelectionPath,
+                                                   const QString& text)
+    : QUndoCommand(text), m_doc(doc),
+      m_oldWidth(oldWidth), m_oldHeight(oldHeight), m_oldImages(oldImages), m_oldSelectionPath(oldSelectionPath),
+      m_newWidth(newWidth), m_newHeight(newHeight), m_newImages(newImages), m_newSelectionPath(newSelectionPath) {
+}
+
+void ImageGeometryUndoCommand::undo() {
+    m_doc->setDocumentDimensions(m_oldWidth, m_oldHeight);
+    for (int i = 0; i < m_doc->layerCount() && i < m_oldImages.size(); ++i) {
+        m_doc->layer(i)->setImage(m_oldImages[i].copy());
+    }
+    m_doc->selection().setPath(m_oldSelectionPath);
+    emit m_doc->selectionChanged();
+    emit m_doc->documentChanged();
+}
+
+void ImageGeometryUndoCommand::redo() {
+    if (m_firstRedo) {
+        m_firstRedo = false;
+        return;
+    }
+    m_doc->setDocumentDimensions(m_newWidth, m_newHeight);
+    for (int i = 0; i < m_doc->layerCount() && i < m_newImages.size(); ++i) {
+        m_doc->layer(i)->setImage(m_newImages[i].copy());
+    }
+    m_doc->selection().setPath(m_newSelectionPath);
+    emit m_doc->selectionChanged();
+    emit m_doc->documentChanged();
+}
+
+FlattenUndoCommand::FlattenUndoCommand(Document* doc,
+                                       const QList<std::shared_ptr<Layer>>& oldLayers,
+                                       int oldActiveIndex,
+                                       const QList<std::shared_ptr<Layer>>& newLayers,
+                                       int newActiveIndex,
+                                       const QString& text)
+    : QUndoCommand(text), m_doc(doc),
+      m_oldLayers(oldLayers), m_oldActiveIndex(oldActiveIndex),
+      m_newLayers(newLayers), m_newActiveIndex(newActiveIndex) {
+}
+
+void FlattenUndoCommand::undo() {
+    m_doc->setLayers(m_oldLayers, m_oldActiveIndex);
+}
+
+void FlattenUndoCommand::redo() {
+    if (m_firstRedo) {
+        m_firstRedo = false;
+        return;
+    }
+    m_doc->setLayers(m_newLayers, m_newActiveIndex);
+}
+
 } // namespace pdn
