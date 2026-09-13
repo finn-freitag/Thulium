@@ -51,6 +51,7 @@ public:
     void setMode(TransformMode m) { m_mode = m; }
     const QTransform& transform() const { return m_transform; }
     std::array<QPointF, 4> currentQuad() const;
+    void initSessionFromDoc(Document* doc);
 
 protected:
     virtual void onSessionStarted(Document* doc) {}
@@ -58,7 +59,6 @@ protected:
     virtual void onSessionEnded(Document* doc) {}
     virtual bool isPixelTool() const { return false; }
 
-    void initSessionFromDoc(Document* doc);
     void updateDocTransform(Document* doc);
     QPointF currentCenter() const;
 

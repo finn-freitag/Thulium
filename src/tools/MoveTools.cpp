@@ -213,7 +213,7 @@ void MoveToolBase::updateDocTransform(Document* doc) {
 void MoveToolBase::mousePress(QMouseEvent* event, Document* doc, const QPointF& docPos, ToolContext& /*ctx*/) {
     if (!doc) return;
 
-    if (!m_hasSession) {
+    if (!m_hasSession || (isPixelTool() && !doc->hasFloatingSelection())) {
         initSessionFromDoc(doc);
     }
     if (!m_hasSession) return;

@@ -14,6 +14,7 @@
 #include "LayersDock.h"
 #include "ColorsDock.h"
 #include "StatusWidget.h"
+#include "Dialogs.h"
 
 namespace pdn {
 
@@ -43,6 +44,16 @@ public:
     bool saveDocument(int index);
     bool saveDocumentAs(int index);
     bool saveAllDocuments();
+
+    // Clipboard & paste operations
+    QImage getClipboardImage(QString* outFileName = nullptr) const;
+    bool pasteImage(const QImage& img, CanvasExpandChoice expandChoice = CanvasExpandChoice::Prompt, const QString& sourceName = "");
+    bool pasteImageIntoNewLayer(const QImage& img, CanvasExpandChoice expandChoice = CanvasExpandChoice::Prompt, const QString& sourceName = "");
+    bool addImageAsLayer(const QImage& img, const QString& layerName, CanvasExpandChoice expandChoice = CanvasExpandChoice::Prompt);
+
+    // Dialog prompts
+    CanvasExpandChoice askCanvasExpand(bool isPaste);
+    DropActionChoice askDropAction(const QStringList& filePaths);
 
     ToolManager* toolManager() const { return m_toolMgr; }
     CanvasView* canvasView() const { return m_canvasView; }

@@ -153,3 +153,7 @@ add_executable(test_metadata tests/test_metadata.cpp)
 target_link_libraries(test_metadata PRIVATE pdn_core)
 add_test(NAME test_metadata COMMAND test_metadata "${CMAKE_CURRENT_SOURCE_DIR}/Card.pdn")
 
+add_executable(test_clipboard_and_drop tests/test_clipboard_and_drop.cpp)
+target_link_libraries(test_clipboard_and_drop PRIVATE pdn_core)
+add_test(NAME test_clipboard_and_drop COMMAND test_clipboard_and_drop "${CMAKE_CURRENT_SOURCE_DIR}")
+

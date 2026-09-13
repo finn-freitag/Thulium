@@ -13,6 +13,20 @@
 
 namespace pdn {
 
+enum class CanvasExpandChoice {
+    Prompt,
+    ExpandCanvas,
+    KeepCanvasSize,
+    Cancel
+};
+
+enum class DropActionChoice {
+    Prompt,
+    Open,
+    AddAsLayer,
+    Cancel
+};
+
 class LayerPropertiesDialog : public QDialog {
     Q_OBJECT
 public:

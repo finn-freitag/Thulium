@@ -6,10 +6,12 @@
 #include "../core/History.h"
 #include "../tools/TextTool.h"
 #include "../tools/ShapeTools.h"
+#include "../tools/MoveTools.h"
 #include <QMenuBar>
 #include <QStatusBar>
 #include <QFileDialog>
 #include <QMessageBox>
+#include <QPushButton>
 #include <QClipboard>
 #include <QGuiApplication>
 #include <QMimeData>
@@ -714,16 +716,149 @@ void MainWindow::onCopy() {
     clipboard->setImage(cropped);
 }
 
-void MainWindow::onPaste() {
+QImage MainWindow::getClipboardImage(QString* outFileName) const {
     const QClipboard* clipboard = QGuiApplication::clipboard();
+    if (!clipboard) return QImage();
     const QMimeData* mimeData = clipboard->mimeData();
-    if (!mimeData || !mimeData->hasImage() || !m_doc) return;
+    if (!mimeData) return QImage();
 
-    QImage img = qvariant_cast<QImage>(clipboard->image());
-    if (img.isNull()) return;
+    // 1. First check if URLs contain local image files (e.g. copied from file explorer)
+    if (mimeData->hasUrls()) {
+        for (const QUrl& url : mimeData->urls()) {
+            if (url.isLocalFile()) {
+                QString localPath = url.toLocalFile();
+                if (ImageIO::isImageFile(localPath)) {
+                    QImage img = ImageIO::loadImage(localPath);
+                    if (!img.isNull()) {
+                        if (outFileName) {
+                            *outFileName = QFileInfo(localPath).completeBaseName();
+                        }
+                        return img;
+                    }
+                }
+            }
+        }
+    }
+
+    // 2. Check if clipboard has raw image
+    if (mimeData->hasImage()) {
+        QImage img = qvariant_cast<QImage>(clipboard->image());
+        if (!img.isNull()) {
+            if (img.format() != QImage::Format_ARGB32) {
+                img = img.convertToFormat(QImage::Format_ARGB32);
+            }
+            if (outFileName) {
+                *outFileName = QString();
+            }
+            return img;
+        }
+    }
+
+    // 3. Fallback: check if text contains local file path
+    if (mimeData->hasText()) {
+        QString text = mimeData->text().trimmed();
+        if (text.startsWith("file://", Qt::CaseInsensitive)) {
+            QUrl u(text);
+            if (u.isLocalFile()) {
+                QString localPath = u.toLocalFile();
+                if (ImageIO::isImageFile(localPath)) {
+                    QImage img = ImageIO::loadImage(localPath);
+                    if (!img.isNull()) {
+                        if (outFileName) *outFileName = QFileInfo(localPath).completeBaseName();
+                        return img;
+                    }
+                }
+            }
+        } else if (QFileInfo::exists(text) && QFileInfo(text).isFile()) {
+            if (ImageIO::isImageFile(text)) {
+                QImage img = ImageIO::loadImage(text);
+                if (!img.isNull()) {
+                    if (outFileName) *outFileName = QFileInfo(text).completeBaseName();
+                    return img;
+                }
+            }
+        }
+    }
+
+    return QImage();
+}
+
+CanvasExpandChoice MainWindow::askCanvasExpand(bool isPaste) {
+    QMessageBox box(this);
+    box.setWindowTitle("Paint.NET Clone");
+    box.setIcon(QMessageBox::Question);
+    if (isPaste) {
+        box.setText("The image being pasted is larger than the canvas size.\n\nWould you like to expand the canvas size?");
+    } else {
+        box.setText("The image being added is larger than the canvas size.\n\nWould you like to expand the canvas size?");
+    }
+    QPushButton* expandBtn = box.addButton("Expand canvas", QMessageBox::AcceptRole);
+    QPushButton* keepBtn = box.addButton("Keep canvas size", QMessageBox::ActionRole);
+    QPushButton* cancelBtn = box.addButton("Cancel", QMessageBox::RejectRole);
+    box.setDefaultButton(expandBtn);
+    box.setEscapeButton(cancelBtn);
+
+    box.exec();
+
+    if (box.clickedButton() == expandBtn) {
+        return CanvasExpandChoice::ExpandCanvas;
+    } else if (box.clickedButton() == keepBtn) {
+        return CanvasExpandChoice::KeepCanvasSize;
+    } else {
+        return CanvasExpandChoice::Cancel;
+    }
+}
+
+DropActionChoice MainWindow::askDropAction(const QStringList& filePaths) {
+    QMessageBox box(this);
+    box.setWindowTitle("Paint.NET Clone");
+    box.setIcon(QMessageBox::Question);
+    if (filePaths.size() == 1) {
+        box.setText(QString("Do you want to open \"%1\" as a new document, or add it as a new layer to the current document?")
+                        .arg(QFileInfo(filePaths[0]).fileName()));
+    } else {
+        box.setText("Do you want to open the images as new documents, or add them as new layers to the current document?");
+    }
+    QPushButton* openBtn = box.addButton("Open", QMessageBox::AcceptRole);
+    QPushButton* addLayerBtn = box.addButton(filePaths.size() == 1 ? "Add as Layer" : "Add as Layers", QMessageBox::ActionRole);
+    QPushButton* cancelBtn = box.addButton("Cancel", QMessageBox::RejectRole);
+    box.setDefaultButton(openBtn);
+    box.setEscapeButton(cancelBtn);
+
+    box.exec();
+
+    if (box.clickedButton() == openBtn) {
+        return DropActionChoice::Open;
+    } else if (box.clickedButton() == addLayerBtn) {
+        return DropActionChoice::AddAsLayer;
+    } else {
+        return DropActionChoice::Cancel;
+    }
+}
+
+bool MainWindow::pasteImage(const QImage& img, CanvasExpandChoice expandChoice, const QString& /*sourceName*/) {
+    if (img.isNull() || !m_doc) return false;
+
+    bool exceeds = (img.width() > m_doc->width() || img.height() > m_doc->height());
+    if (exceeds) {
+        CanvasExpandChoice choice = expandChoice;
+        if (choice == CanvasExpandChoice::Prompt) {
+            choice = askCanvasExpand(true);
+        }
+        if (choice == CanvasExpandChoice::Cancel) return false;
+        if (choice == CanvasExpandChoice::ExpandCanvas) {
+            int newW = std::max(m_doc->width(), img.width());
+            int newH = std::max(m_doc->height(), img.height());
+            m_doc->resizeCanvas(newW, newH, Qt::AlignLeft | Qt::AlignTop);
+            if (m_statusWidget) {
+                m_statusWidget->setDocumentSize(m_doc->width(), m_doc->height());
+            }
+            updateTitle();
+        }
+    }
 
     QPoint pastePos(0, 0);
-    if (s_hasLastCopied && img.size() == s_lastCopiedSize) {
+    if (!exceeds && s_hasLastCopied && img.size() == s_lastCopiedSize) {
         pastePos = s_lastCopiedPos;
     }
 
@@ -739,38 +874,119 @@ void MainWindow::onPaste() {
 
     m_doc->selection().clear();
     m_doc->selection().addRect(QRectF(pastePos, img.size()), SelectionCombineMode::Replace);
+
     emit m_doc->selectionChanged();
     emit m_doc->documentChanged();
+    return true;
 }
 
-void MainWindow::onPasteIntoNewLayer() {
-    const QClipboard* clipboard = QGuiApplication::clipboard();
-    const QMimeData* mimeData = clipboard->mimeData();
-    if (!mimeData || !mimeData->hasImage() || !m_doc) return;
+bool MainWindow::pasteImageIntoNewLayer(const QImage& img, CanvasExpandChoice expandChoice, const QString& sourceName) {
+    if (img.isNull() || !m_doc) return false;
 
-    QImage img = qvariant_cast<QImage>(clipboard->image());
-    if (img.isNull()) return;
+    bool exceeds = (img.width() > m_doc->width() || img.height() > m_doc->height());
+    if (exceeds) {
+        CanvasExpandChoice choice = expandChoice;
+        if (choice == CanvasExpandChoice::Prompt) {
+            choice = askCanvasExpand(true);
+        }
+        if (choice == CanvasExpandChoice::Cancel) return false;
+        if (choice == CanvasExpandChoice::ExpandCanvas) {
+            int newW = std::max(m_doc->width(), img.width());
+            int newH = std::max(m_doc->height(), img.height());
+            m_doc->resizeCanvas(newW, newH, Qt::AlignLeft | Qt::AlignTop);
+            if (m_statusWidget) {
+                m_statusWidget->setDocumentSize(m_doc->width(), m_doc->height());
+            }
+            updateTitle();
+        }
+    }
+
+    QPoint pastePos(0, 0);
+    if (!exceeds && s_hasLastCopied && img.size() == s_lastCopiedSize) {
+        pastePos = s_lastCopiedPos;
+    }
 
     if (m_doc->hasFloatingSelection()) {
         m_doc->bakeFloatingSelection();
     }
 
-    QPoint pastePos(0, 0);
-    if (s_hasLastCopied && img.size() == s_lastCopiedSize) {
-        pastePos = s_lastCopiedPos;
+    QString layerName = sourceName.isEmpty() ? "Pasted Layer" : sourceName;
+    auto newLayer = m_doc->addLayer(layerName);
+    if (!newLayer) return false;
+
+    if (m_toolMgr) {
+        m_toolMgr->setActiveTool(ToolType::MoveSelectedPixels);
     }
 
-    auto newLayer = m_doc->addLayer("Pasted Layer");
-    if (newLayer) {
-        QPainter p(&newLayer->image());
-        p.drawImage(pastePos, img);
-        p.end();
+    m_doc->createFloatingSelection(img, pastePos, false, "Paste into New Layer");
 
-        m_doc->selection().clear();
-        m_doc->selection().addRect(QRectF(pastePos, img.size()), SelectionCombineMode::Replace);
-        emit m_doc->selectionChanged();
-        emit m_doc->documentChanged();
+    m_doc->selection().clear();
+    m_doc->selection().addRect(QRectF(pastePos, img.size()), SelectionCombineMode::Replace);
+
+    emit m_doc->selectionChanged();
+    emit m_doc->documentChanged();
+    return true;
+}
+
+bool MainWindow::addImageAsLayer(const QImage& img, const QString& layerName, CanvasExpandChoice expandChoice) {
+    if (img.isNull() || !m_doc) return false;
+
+    bool exceeds = (img.width() > m_doc->width() || img.height() > m_doc->height());
+    if (exceeds) {
+        CanvasExpandChoice choice = expandChoice;
+        if (choice == CanvasExpandChoice::Prompt) {
+            choice = askCanvasExpand(false);
+        }
+        if (choice == CanvasExpandChoice::Cancel) return false;
+        if (choice == CanvasExpandChoice::ExpandCanvas) {
+            int newW = std::max(m_doc->width(), img.width());
+            int newH = std::max(m_doc->height(), img.height());
+            m_doc->resizeCanvas(newW, newH, Qt::AlignLeft | Qt::AlignTop);
+            if (m_statusWidget) {
+                m_statusWidget->setDocumentSize(m_doc->width(), m_doc->height());
+            }
+            updateTitle();
+        }
     }
+
+    if (m_doc->hasFloatingSelection()) {
+        m_doc->bakeFloatingSelection();
+    }
+
+    QString lName = layerName.isEmpty() ? "Layer" : layerName;
+    auto newLayer = m_doc->addLayer(lName);
+    if (!newLayer) return false;
+
+    if (m_toolMgr) {
+        m_toolMgr->setActiveTool(ToolType::MoveSelectedPixels);
+    }
+
+    m_doc->createFloatingSelection(img, QPoint(0, 0), false, "Add Layer From File");
+
+    m_doc->selection().clear();
+    m_doc->selection().addRect(QRectF(0, 0, img.width(), img.height()), SelectionCombineMode::Replace);
+
+    emit m_doc->selectionChanged();
+    emit m_doc->documentChanged();
+    return true;
+}
+
+void MainWindow::onPaste() {
+    if (!m_doc) return;
+    QString sourceName;
+    QImage img = getClipboardImage(&sourceName);
+    if (img.isNull()) return;
+
+    pasteImage(img, CanvasExpandChoice::Prompt, sourceName);
+}
+
+void MainWindow::onPasteIntoNewLayer() {
+    if (!m_doc) return;
+    QString sourceName;
+    QImage img = getClipboardImage(&sourceName);
+    if (img.isNull()) return;
+
+    pasteImageIntoNewLayer(img, CanvasExpandChoice::Prompt, sourceName);
 }
 
 void MainWindow::onEraseSelection() {
@@ -931,7 +1147,8 @@ void MainWindow::closeEvent(QCloseEvent* event) {
 }
 
 void MainWindow::dragEnterEvent(QDragEnterEvent* event) {
-    if (event->mimeData()->hasUrls()) {
+    const QMimeData* mimeData = event->mimeData();
+    if (mimeData && (mimeData->hasUrls() || mimeData->hasImage())) {
         event->acceptProposedAction();
     } else {
         QMainWindow::dragEnterEvent(event);
@@ -939,12 +1156,78 @@ void MainWindow::dragEnterEvent(QDragEnterEvent* event) {
 }
 
 void MainWindow::dropEvent(QDropEvent* event) {
-    const auto urls = event->mimeData()->urls();
-    for (const QUrl& url : urls) {
-        if (url.isLocalFile()) {
-            openFile(url.toLocalFile());
+    const QMimeData* mimeData = event->mimeData();
+    if (!mimeData) return;
+
+    QStringList imageFiles;
+    if (mimeData->hasUrls()) {
+        for (const QUrl& url : mimeData->urls()) {
+            if (url.isLocalFile()) {
+                QString path = url.toLocalFile();
+                if (ImageIO::isImageFile(path)) {
+                    imageFiles.append(path);
+                }
+            }
         }
     }
+
+    if (imageFiles.isEmpty()) {
+        if (mimeData->hasImage()) {
+            QImage img = qvariant_cast<QImage>(mimeData->imageData());
+            if (!img.isNull()) {
+                if (img.format() != QImage::Format_ARGB32) {
+                    img = img.convertToFormat(QImage::Format_ARGB32);
+                }
+                if (!m_doc || m_documents.isEmpty()) {
+                    auto newDoc = std::make_shared<Document>(img);
+                    addDocument(newDoc, true);
+                } else {
+                    DropActionChoice choice = askDropAction({ "Dropped Image" });
+                    if (choice == DropActionChoice::Open) {
+                        auto newDoc = std::make_shared<Document>(img);
+                        addDocument(newDoc, true);
+                    } else if (choice == DropActionChoice::AddAsLayer) {
+                        addImageAsLayer(img, "Dropped Image", CanvasExpandChoice::Prompt);
+                    }
+                }
+                event->acceptProposedAction();
+                return;
+            }
+        }
+        QMainWindow::dropEvent(event);
+        return;
+    }
+
+    if (!m_doc || m_documents.isEmpty()) {
+        for (const QString& file : imageFiles) {
+            openFile(file);
+        }
+        event->acceptProposedAction();
+        return;
+    }
+
+    DropActionChoice choice = askDropAction(imageFiles);
+    if (choice == DropActionChoice::Cancel) {
+        event->acceptProposedAction();
+        return;
+    }
+
+    if (choice == DropActionChoice::Open) {
+        for (const QString& file : imageFiles) {
+            openFile(file);
+        }
+    } else if (choice == DropActionChoice::AddAsLayer) {
+        for (const QString& file : imageFiles) {
+            QImage img = ImageIO::loadImage(file);
+            if (!img.isNull()) {
+                QString layerName = QFileInfo(file).completeBaseName();
+                addImageAsLayer(img, layerName, CanvasExpandChoice::Prompt);
+            } else {
+                QMessageBox::critical(this, "Error Opening Image", QString("Could not load image from %1").arg(file));
+            }
+        }
+    }
+
     event->acceptProposedAction();
 }
 
