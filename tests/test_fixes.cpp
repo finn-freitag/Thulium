@@ -694,6 +694,240 @@ int main(int argc, char* argv[]) {
         std::cout << "  Passed: Copy/Cut/Paste, position persistence, selection bounds, and floating temporary layer all work properly!" << std::endl;
     }
 
+    // Test 11: Move Tool Resize and Rotate (Paint.NET behavior)
+    {
+        std::cout << "Test 11: Move tool resize and rotate..." << std::endl;
+        auto doc = std::make_shared<pdn::Document>(200, 200);
+        auto layer = doc->activeLayer();
+        // Fill a 40x40 square with solid blue at (20, 20)
+        for (int y = 20; y < 60; ++y) {
+            for (int x = 20; x < 60; ++x) {
+                layer->scanLine(y)[x] = 0xFF0000FF; // Solid blue
+            }
+        }
+
+        pdn::ToolManager toolMgr;
+        toolMgr.setDocument(doc.get());
+
+        // Select the 40x40 region
+        doc->selection().addRect(QRectF(20, 20, 40, 40));
+        assert(!doc->selection().isEmpty());
+
+        toolMgr.setActiveTool(pdn::ToolType::MoveSelectedPixels);
+        auto moveTool = std::dynamic_pointer_cast<pdn::MoveSelectedPixelsTool>(toolMgr.activeTool());
+        assert(moveTool != nullptr);
+        assert(moveTool->mode() == pdn::TransformMode::Resize);
+
+        // Hover over inside: cursor should be SizeAllCursor
+        QMouseEvent hoverInside(QEvent::MouseMove, QPointF(40, 40), Qt::NoButton, Qt::NoButton, Qt::NoModifier);
+        moveTool->mouseMove(&hoverInside, doc.get(), QPointF(40, 40), toolMgr.context());
+        assert(moveTool->cursor() == Qt::SizeAllCursor);
+
+        // Hover over bottom-right handle (60, 60): cursor should be SizeFDiagCursor
+        QMouseEvent hoverSE(QEvent::MouseMove, QPointF(60, 60), Qt::NoButton, Qt::NoButton, Qt::NoModifier);
+        moveTool->mouseMove(&hoverSE, doc.get(), QPointF(60, 60), toolMgr.context());
+        assert(moveTool->cursor() == Qt::SizeFDiagCursor);
+
+        // 1. Resize without Shift: drag SE corner from (60, 60) to (80, 70)
+        QMouseEvent pressSE(QEvent::MouseButtonPress, QPointF(60, 60), Qt::LeftButton, Qt::LeftButton, Qt::NoModifier);
+        moveTool->mousePress(&pressSE, doc.get(), QPointF(60, 60), toolMgr.context());
+        QMouseEvent dragSE(QEvent::MouseMove, QPointF(80, 70), Qt::LeftButton, Qt::LeftButton, Qt::NoModifier);
+        moveTool->mouseMove(&dragSE, doc.get(), QPointF(80, 70), toolMgr.context());
+        QMouseEvent releaseSE(QEvent::MouseButtonRelease, QPointF(80, 70), Qt::LeftButton, Qt::NoButton, Qt::NoModifier);
+        moveTool->mouseRelease(&releaseSE, doc.get(), QPointF(80, 70), toolMgr.context());
+
+        QRectF resizedBounds = doc->selection().boundingRect();
+        assert(std::abs(resizedBounds.x() - 20) < 0.1);
+        assert(std::abs(resizedBounds.y() - 20) < 0.1);
+        assert(std::abs(resizedBounds.width() - 60) < 0.1);
+        assert(std::abs(resizedBounds.height() - 50) < 0.1);
+
+        // 2. Resize with Shift (aspect ratio locked to original 40:40 = 1:1):
+        // Drag SE corner to (100, 120) with Shift
+        QMouseEvent pressShift(QEvent::MouseButtonPress, QPointF(80, 70), Qt::LeftButton, Qt::LeftButton, Qt::ShiftModifier);
+        moveTool->mousePress(&pressShift, doc.get(), QPointF(80, 70), toolMgr.context());
+        QMouseEvent dragShift(QEvent::MouseMove, QPointF(100, 120), Qt::LeftButton, Qt::LeftButton, Qt::ShiftModifier);
+        moveTool->mouseMove(&dragShift, doc.get(), QPointF(100, 120), toolMgr.context());
+        QMouseEvent releaseShift(QEvent::MouseButtonRelease, QPointF(100, 120), Qt::LeftButton, Qt::NoButton, Qt::ShiftModifier);
+        moveTool->mouseRelease(&releaseShift, doc.get(), QPointF(100, 120), toolMgr.context());
+
+        QRectF shiftBounds = doc->selection().boundingRect();
+        assert(std::abs(shiftBounds.x() - 20) < 0.1);
+        assert(std::abs(shiftBounds.y() - 20) < 0.1);
+        assert(std::abs(shiftBounds.width() - shiftBounds.height()) < 0.1);
+        assert(std::abs(shiftBounds.width() - 100) < 0.1);
+
+        // 3. Click inside selected part toggles to Rotation mode
+        QPointF centerPt = shiftBounds.center();
+        QMouseEvent clickInsidePress(QEvent::MouseButtonPress, centerPt, Qt::LeftButton, Qt::LeftButton, Qt::NoModifier);
+        moveTool->mousePress(&clickInsidePress, doc.get(), centerPt, toolMgr.context());
+        QMouseEvent clickInsideRelease(QEvent::MouseButtonRelease, centerPt, Qt::LeftButton, Qt::NoButton, Qt::NoModifier);
+        moveTool->mouseRelease(&clickInsideRelease, doc.get(), centerPt, toolMgr.context());
+
+        assert(moveTool->mode() == pdn::TransformMode::Rotate);
+
+        // Cursor on border should now be rotation cursor!
+        QMouseEvent hoverBorder(QEvent::MouseMove, QPointF(shiftBounds.right(), centerPt.y()), Qt::NoButton, Qt::NoButton, Qt::NoModifier);
+        moveTool->mouseMove(&hoverBorder, doc.get(), QPointF(shiftBounds.right(), centerPt.y()), toolMgr.context());
+        assert(moveTool->cursor() != Qt::SizeHorCursor && moveTool->cursor() != Qt::ArrowCursor);
+
+        // 4. Rotate with Shift: 15-degree angle snapping
+        QPointF handleRight(shiftBounds.right(), centerPt.y());
+        QMouseEvent rotPress(QEvent::MouseButtonPress, handleRight, Qt::LeftButton, Qt::LeftButton, Qt::ShiftModifier);
+        moveTool->mousePress(&rotPress, doc.get(), handleRight, toolMgr.context());
+
+        // In the beginning, drag by a small angle (~3 deg): with Shift, it must stay at 0 deg, NOT rotate by a few degrees!
+        QPointF dragSmall(70.0 + 50.0 * std::cos(3.0 * M_PI / 180.0), 70.0 + 50.0 * std::sin(3.0 * M_PI / 180.0));
+        QMouseEvent rotDragSmall(QEvent::MouseMove, dragSmall, Qt::LeftButton, Qt::LeftButton, Qt::ShiftModifier);
+        moveTool->mouseMove(&rotDragSmall, doc.get(), dragSmall, toolMgr.context());
+
+        QPointF p0 = doc->floatingTransform().map(QPointF(0, 0));
+        QPointF p1 = doc->floatingTransform().map(QPointF(100, 0));
+        qreal angleDeg = std::atan2(p1.y() - p0.y(), p1.x() - p0.x()) * 180.0 / M_PI;
+        if (angleDeg < 0) angleDeg += 360.0;
+        assert(std::abs(angleDeg - 0.0) < 0.01); // EXACTLY 0 deg, no initial jump!
+
+        // Drag to ~20 deg: center is (70, 70) -> snaps to 15 deg
+        QPointF dragTarget(70.0 + 47.0, 70.0 + 17.0);
+        QMouseEvent rotDrag(QEvent::MouseMove, dragTarget, Qt::LeftButton, Qt::LeftButton, Qt::ShiftModifier);
+        moveTool->mouseMove(&rotDrag, doc.get(), dragTarget, toolMgr.context());
+
+        // Rotation snapped to 15 degrees!
+        p0 = doc->floatingTransform().map(QPointF(0, 0));
+        p1 = doc->floatingTransform().map(QPointF(100, 0));
+        angleDeg = std::atan2(p1.y() - p0.y(), p1.x() - p0.x()) * 180.0 / M_PI;
+        if (angleDeg < 0) angleDeg += 360.0;
+        assert(std::abs(angleDeg - 15.0) < 0.5);
+
+        // Now drag to ~38 deg -> should snap to 45 degrees
+        QPointF dragTarget45(70.0 + 50.0 * std::cos(38.0 * M_PI / 180.0), 70.0 + 50.0 * std::sin(38.0 * M_PI / 180.0));
+        QMouseEvent rotDrag45(QEvent::MouseMove, dragTarget45, Qt::LeftButton, Qt::LeftButton, Qt::ShiftModifier);
+        moveTool->mouseMove(&rotDrag45, doc.get(), dragTarget45, toolMgr.context());
+
+        p0 = doc->floatingTransform().map(QPointF(0, 0));
+        p1 = doc->floatingTransform().map(QPointF(100, 0));
+        angleDeg = std::atan2(p1.y() - p0.y(), p1.x() - p0.x()) * 180.0 / M_PI;
+        if (angleDeg < 0) angleDeg += 360.0;
+        assert(std::abs(angleDeg - 45.0) < 0.5);
+
+        QMouseEvent rotRelease(QEvent::MouseButtonRelease, dragTarget45, Qt::LeftButton, Qt::NoButton, Qt::ShiftModifier);
+        moveTool->mouseRelease(&rotRelease, doc.get(), dragTarget45, toolMgr.context());
+
+        // 5. Click inside selection again toggles back to Resize mode
+        moveTool->mousePress(&clickInsidePress, doc.get(), centerPt, toolMgr.context());
+        moveTool->mouseRelease(&clickInsideRelease, doc.get(), centerPt, toolMgr.context());
+        assert(moveTool->mode() == pdn::TransformMode::Resize);
+
+        // 6. Commit / Bake
+        moveTool->commit(doc.get());
+        assert(!doc->hasFloatingSelection());
+
+        std::cout << "  Passed: Move tool resize (free & Shift aspect-ratio), click-to-rotate toggle, and 15-degree rotation snapping work perfectly!" << std::endl;
+    }
+
+    // Test 12: Move Selection Tool (outline-only transform, right-click rotate, untouched layer bitmap)
+    {
+        std::cout << "Test 12: Move selection tool (outline only, 15-deg snapping, right-click rotate)..." << std::endl;
+        auto doc = std::make_shared<pdn::Document>(200, 200);
+        auto layer = doc->activeLayer();
+        layer->fill(Qt::white);
+        // Put a red marker at (50, 50)
+        layer->scanLine(50)[50] = 0xFFFF0000;
+
+        pdn::ToolManager toolMgr;
+        toolMgr.setDocument(doc.get());
+
+        // Create selection at (30, 30, 40, 40)
+        doc->selection().addRect(QRectF(30, 30, 40, 40));
+
+        toolMgr.setActiveTool(pdn::ToolType::MoveSelection);
+        auto selTool = std::dynamic_pointer_cast<pdn::MoveSelectionTool>(toolMgr.activeTool());
+        assert(selTool != nullptr);
+        assert(selTool->mode() == pdn::TransformMode::Resize);
+
+        // Hover over handle: East handle is at (70, 50)
+        QMouseEvent hoverE(QEvent::MouseMove, QPointF(70, 50), Qt::NoButton, Qt::NoButton, Qt::NoModifier);
+        selTool->mouseMove(&hoverE, doc.get(), QPointF(70, 50), toolMgr.context());
+        assert(selTool->cursor() == Qt::SizeHorCursor);
+
+        // 1. Resize East handle from (70, 50) to (90, 50)
+        QMouseEvent pressE(QEvent::MouseButtonPress, QPointF(70, 50), Qt::LeftButton, Qt::LeftButton, Qt::NoModifier);
+        selTool->mousePress(&pressE, doc.get(), QPointF(70, 50), toolMgr.context());
+        QMouseEvent dragE(QEvent::MouseMove, QPointF(90, 50), Qt::LeftButton, Qt::LeftButton, Qt::NoModifier);
+        selTool->mouseMove(&dragE, doc.get(), QPointF(90, 50), toolMgr.context());
+        QMouseEvent releaseE(QEvent::MouseButtonRelease, QPointF(90, 50), Qt::LeftButton, Qt::NoButton, Qt::NoModifier);
+        selTool->mouseRelease(&releaseE, doc.get(), QPointF(90, 50), toolMgr.context());
+
+        QRectF boundsAfterResize = doc->selection().boundingRect();
+        assert(std::abs(boundsAfterResize.x() - 30) < 0.1);
+        assert(std::abs(boundsAfterResize.y() - 30) < 0.1);
+        assert(std::abs(boundsAfterResize.width() - 60) < 0.1); // 40 + 20
+        assert(std::abs(boundsAfterResize.height() - 40) < 0.1);
+
+        // Layer pixels MUST be untouched (MoveSelectionTool only moves the selection outline)
+        assert(layer->scanLine(50)[50] == 0xFFFF0000);
+        assert(!doc->hasFloatingSelection());
+
+        // 2. Click inside toggles to Rotate mode
+        QPointF centerPt = boundsAfterResize.center();
+        QMouseEvent clickInsidePress(QEvent::MouseButtonPress, centerPt, Qt::LeftButton, Qt::LeftButton, Qt::NoModifier);
+        selTool->mousePress(&clickInsidePress, doc.get(), centerPt, toolMgr.context());
+        QMouseEvent clickInsideRelease(QEvent::MouseButtonRelease, centerPt, Qt::LeftButton, Qt::NoButton, Qt::NoModifier);
+        selTool->mouseRelease(&clickInsideRelease, doc.get(), centerPt, toolMgr.context());
+        assert(selTool->mode() == pdn::TransformMode::Rotate);
+
+        // 3. Right-click drag rotates directly even in Resize mode, and left-drag rotates in Rotate mode
+        // Test clicking on top-right corner of a non-square (60x40) rectangle with Shift held
+        QPointF cornerTR(boundsAfterResize.right(), boundsAfterResize.top());
+        QMouseEvent rotPressCorner(QEvent::MouseButtonPress, cornerTR, Qt::LeftButton, Qt::LeftButton, Qt::ShiftModifier);
+        selTool->mousePress(&rotPressCorner, doc.get(), cornerTR, toolMgr.context());
+
+        // Drag slightly (~2 deg around center): angle must stay at EXACTLY 0.0 deg (no initial offset/jump!)
+        qreal cornerRadius = std::hypot(cornerTR.x() - centerPt.x(), cornerTR.y() - centerPt.y());
+        qreal cornerAngleRad = std::atan2(cornerTR.y() - centerPt.y(), cornerTR.x() - centerPt.x());
+        QPointF dragSmallCorner(centerPt.x() + cornerRadius * std::cos(cornerAngleRad + 2.0 * M_PI / 180.0),
+                                centerPt.y() + cornerRadius * std::sin(cornerAngleRad + 2.0 * M_PI / 180.0));
+        QMouseEvent rotDragSmallCorner(QEvent::MouseMove, dragSmallCorner, Qt::LeftButton, Qt::LeftButton, Qt::ShiftModifier);
+        selTool->mouseMove(&rotDragSmallCorner, doc.get(), dragSmallCorner, toolMgr.context());
+
+        auto currentQuad = selTool->currentQuad();
+        qreal currentAngleDeg = std::atan2(currentQuad[1].y() - currentQuad[0].y(), currentQuad[1].x() - currentQuad[0].x()) * 180.0 / M_PI;
+        if (currentAngleDeg < 0) currentAngleDeg += 360.0;
+        assert(std::abs(currentAngleDeg - 0.0) < 0.01); // EXACTLY 0 deg, no jump despite corner angle being -33.69 deg!
+
+        // Drag to ~20 deg -> snaps to 15 deg
+        QPointF drag15Corner(centerPt.x() + cornerRadius * std::cos(cornerAngleRad + 19.0 * M_PI / 180.0),
+                             centerPt.y() + cornerRadius * std::sin(cornerAngleRad + 19.0 * M_PI / 180.0));
+        QMouseEvent rotDrag15Corner(QEvent::MouseMove, drag15Corner, Qt::LeftButton, Qt::LeftButton, Qt::ShiftModifier);
+        selTool->mouseMove(&rotDrag15Corner, doc.get(), drag15Corner, toolMgr.context());
+
+        currentQuad = selTool->currentQuad();
+        currentAngleDeg = std::atan2(currentQuad[1].y() - currentQuad[0].y(), currentQuad[1].x() - currentQuad[0].x()) * 180.0 / M_PI;
+        if (currentAngleDeg < 0) currentAngleDeg += 360.0;
+        assert(std::abs(currentAngleDeg - 15.0) < 0.5);
+
+        // Drag to ~33 deg -> snaps to 30 deg
+        QPointF drag30Corner(centerPt.x() + cornerRadius * std::cos(cornerAngleRad + 33.0 * M_PI / 180.0),
+                             centerPt.y() + cornerRadius * std::sin(cornerAngleRad + 33.0 * M_PI / 180.0));
+        QMouseEvent rotDrag30Corner(QEvent::MouseMove, drag30Corner, Qt::LeftButton, Qt::LeftButton, Qt::ShiftModifier);
+        selTool->mouseMove(&rotDrag30Corner, doc.get(), drag30Corner, toolMgr.context());
+
+        currentQuad = selTool->currentQuad();
+        currentAngleDeg = std::atan2(currentQuad[1].y() - currentQuad[0].y(), currentQuad[1].x() - currentQuad[0].x()) * 180.0 / M_PI;
+        if (currentAngleDeg < 0) currentAngleDeg += 360.0;
+        assert(std::abs(currentAngleDeg - 30.0) < 0.5);
+
+        QMouseEvent rotReleaseCorner(QEvent::MouseButtonRelease, drag30Corner, Qt::LeftButton, Qt::NoButton, Qt::ShiftModifier);
+        selTool->mouseRelease(&rotReleaseCorner, doc.get(), drag30Corner, toolMgr.context());
+
+        // Verify selection path was transformed and layer remains untouched
+        assert(!doc->selection().isEmpty());
+        assert(layer->scanLine(50)[50] == 0xFFFF0000);
+        assert(!doc->hasFloatingSelection());
+
+        std::cout << "  Passed: Move selection tool (outline only, 15-deg snapping, right-click rotate) works properly!" << std::endl;
+    }
+
     std::cout << "=== All Tests Passed Successfully! ===" << std::endl;
     return 0;
 }

@@ -3,6 +3,7 @@
 #include <QObject>
 #include <QList>
 #include <QUndoStack>
+#include <QTransform>
 #include <memory>
 #include "Layer.h"
 #include "Selection.h"
@@ -52,12 +53,15 @@ public:
     // Floating selection (hidden temporary layer for paste & moving selected pixels)
     bool hasFloatingSelection() const { return m_hasFloatingSelection; }
     const QImage& floatingImage() const { return m_floatingImage; }
+    const QImage& originalFloatingImage() const { return m_originalFloatingImage; }
     const QPointF& floatingOffset() const { return m_floatingOffset; }
+    const QTransform& floatingTransform() const { return m_floatingTransform; }
     bool isFloatingLifted() const { return m_floatingIsLifted; }
 
     void createFloatingSelection(const QImage& image, const QPointF& offset, bool isLifted, const QString& actionName = "Paste");
     void liftSelectionToFloating();
     void moveFloatingSelection(const QPointF& delta);
+    void setFloatingTransform(const QTransform& transform);
     void bakeFloatingSelection();
     void cancelFloatingSelection();
     void discardFloatingSelection();
@@ -97,6 +101,8 @@ private:
     // Floating selection state
     bool m_hasFloatingSelection = false;
     QImage m_floatingImage;
+    QImage m_originalFloatingImage;
+    QTransform m_floatingTransform;
     QPointF m_floatingOffset;
     QImage m_floatingSnapshot;
     int m_floatingLayerIndex = 0;

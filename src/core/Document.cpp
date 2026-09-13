@@ -180,8 +180,10 @@ void Document::createFloatingSelection(const QImage& image, const QPointF& offse
     auto layer = activeLayer();
     if (!layer) return;
 
+    m_originalFloatingImage = image.copy();
     m_floatingImage = image.copy();
     m_floatingOffset = offset;
+    m_floatingTransform = QTransform::fromTranslate(offset.x(), offset.y());
     m_floatingLayerIndex = m_activeLayerIndex;
     m_floatingSnapshot = layer->image().copy();
     m_floatingIsLifted = isLifted;
@@ -225,7 +227,9 @@ void Document::liftSelectionToFloating() {
     pLayer.fillPath(m_selection.path(), Qt::transparent);
     pLayer.end();
 
+    m_originalFloatingImage = m_floatingImage.copy();
     m_floatingOffset = srcRect.topLeft();
+    m_floatingTransform = QTransform::fromTranslate(srcRect.x(), srcRect.y());
     m_hasFloatingSelection = true;
 
     emit documentChanged();
@@ -234,8 +238,16 @@ void Document::liftSelectionToFloating() {
 void Document::moveFloatingSelection(const QPointF& delta) {
     if (!m_hasFloatingSelection) return;
     m_floatingOffset += delta;
+    m_floatingTransform = m_floatingTransform * QTransform::fromTranslate(delta.x(), delta.y());
     m_selection.translate(delta.x(), delta.y());
     emit selectionChanged();
+    emit documentChanged();
+}
+
+void Document::setFloatingTransform(const QTransform& transform) {
+    if (!m_hasFloatingSelection) return;
+    m_floatingTransform = transform;
+    m_floatingOffset = m_floatingTransform.map(QPointF(0, 0));
     emit documentChanged();
 }
 
@@ -243,9 +255,15 @@ void Document::bakeFloatingSelection() {
     if (!m_hasFloatingSelection) return;
     auto layer = this->layer(m_floatingLayerIndex);
     if (layer) {
-        QPainter p(&layer->image());
-        p.drawImage(m_floatingOffset, m_floatingImage);
-        p.end();
+        const QImage& srcImg = !m_originalFloatingImage.isNull() ? m_originalFloatingImage : m_floatingImage;
+        if (!srcImg.isNull()) {
+            QPainter p(&layer->image());
+            p.setRenderHint(QPainter::SmoothPixmapTransform, true);
+            p.setRenderHint(QPainter::Antialiasing, true);
+            p.setTransform(m_floatingTransform);
+            p.drawImage(0, 0, srcImg);
+            p.end();
+        }
 
         QString act = m_floatingActionName.isEmpty() ? (m_floatingIsLifted ? "Move Pixels" : "Paste") : m_floatingActionName;
         m_undoStack.push(new LayerBitmapUndoCommand(this, m_floatingLayerIndex, m_floatingSnapshot, act));
@@ -253,6 +271,8 @@ void Document::bakeFloatingSelection() {
 
     m_hasFloatingSelection = false;
     m_floatingImage = QImage();
+    m_originalFloatingImage = QImage();
+    m_floatingTransform = QTransform();
     m_floatingIsLifted = false;
     emit documentChanged();
 }
@@ -265,6 +285,8 @@ void Document::cancelFloatingSelection() {
     }
     m_hasFloatingSelection = false;
     m_floatingImage = QImage();
+    m_originalFloatingImage = QImage();
+    m_floatingTransform = QTransform();
     m_floatingIsLifted = false;
     m_selection.clear();
     emit selectionChanged();
@@ -279,6 +301,8 @@ void Document::discardFloatingSelection() {
     }
     m_hasFloatingSelection = false;
     m_floatingImage = QImage();
+    m_originalFloatingImage = QImage();
+    m_floatingTransform = QTransform();
     m_floatingIsLifted = false;
     emit documentChanged();
 }
@@ -438,12 +462,18 @@ void Document::compositeInto(QImage& target) const {
         blendImages(targetBits, layer->bits(), pixelCount, layer->blendMode(), layer->opacity());
 
         // Composite floating selection directly above active layer
-        if (i == m_activeLayerIndex && m_hasFloatingSelection && !m_floatingImage.isNull()) {
-            QPainter p(&target);
-            p.setOpacity(layer->opacity() / 255.0);
-            p.drawImage(m_floatingOffset, m_floatingImage);
-            p.end();
-            targetBits = reinterpret_cast<uint32_t*>(target.bits());
+        if (i == m_activeLayerIndex && m_hasFloatingSelection) {
+            const QImage& srcImg = !m_originalFloatingImage.isNull() ? m_originalFloatingImage : m_floatingImage;
+            if (!srcImg.isNull()) {
+                QPainter p(&target);
+                p.setOpacity(layer->opacity() / 255.0);
+                p.setRenderHint(QPainter::SmoothPixmapTransform, true);
+                p.setRenderHint(QPainter::Antialiasing, true);
+                p.setTransform(m_floatingTransform);
+                p.drawImage(0, 0, srcImg);
+                p.end();
+                targetBits = reinterpret_cast<uint32_t*>(target.bits());
+            }
         }
     }
 }

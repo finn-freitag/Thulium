@@ -41,6 +41,12 @@ CanvasView::CanvasView(ToolManager* toolMgr, QWidget* parent)
             setZoom(m_renderOpts.zoom * factor, center);
         };
     }
+
+    connect(m_toolMgr, &ToolManager::activeToolChanged, this, [this](ToolType) {
+        auto tool = m_toolMgr->activeTool();
+        setCursor(tool ? tool->cursor() : Qt::ArrowCursor);
+        update();
+    });
 }
 
 void CanvasView::setDocument(std::shared_ptr<Document> doc) {
@@ -271,8 +277,8 @@ void CanvasView::mouseMoveEvent(QMouseEvent* event) {
 
     auto tool = m_toolMgr->activeTool();
     if (tool) {
-        setCursor(tool->cursor());
         tool->mouseMove(event, m_doc.get(), docPos, m_toolMgr->context());
+        setCursor(tool->cursor());
     }
     update();
 }
@@ -290,6 +296,7 @@ void CanvasView::mouseReleaseEvent(QMouseEvent* event) {
     auto tool = m_toolMgr->activeTool();
     if (tool) {
         tool->mouseRelease(event, m_doc.get(), docPos, m_toolMgr->context());
+        setCursor(tool->cursor());
     }
     update();
 }

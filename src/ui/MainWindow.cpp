@@ -334,9 +334,24 @@ void MainWindow::onCopy() {
     if (!m_doc) return;
 
     if (m_doc->hasFloatingSelection()) {
-        QImage cropped = m_doc->floatingImage();
-        if (cropped.isNull()) return;
-        s_lastCopiedPos = m_doc->floatingOffset().toPoint();
+        const QImage& baseImg = !m_doc->originalFloatingImage().isNull() ? m_doc->originalFloatingImage() : m_doc->floatingImage();
+        if (baseImg.isNull()) return;
+
+        QRectF mappedRect = m_doc->floatingTransform().mapRect(QRectF(0, 0, baseImg.width(), baseImg.height()));
+        QRect aligned = mappedRect.toAlignedRect();
+        if (aligned.isEmpty()) return;
+
+        QImage cropped(aligned.size(), QImage::Format_ARGB32);
+        cropped.fill(Qt::transparent);
+        QPainter p(&cropped);
+        p.setRenderHint(QPainter::SmoothPixmapTransform, true);
+        p.setRenderHint(QPainter::Antialiasing, true);
+        p.translate(-aligned.topLeft());
+        p.setTransform(m_doc->floatingTransform(), true);
+        p.drawImage(0, 0, baseImg);
+        p.end();
+
+        s_lastCopiedPos = aligned.topLeft();
         s_lastCopiedSize = cropped.size();
         s_hasLastCopied = true;
 
