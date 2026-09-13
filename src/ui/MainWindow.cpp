@@ -384,6 +384,8 @@ void MainWindow::setupMenus() {
     fileMenu->addAction("&Close", this, &MainWindow::onClose, QKeySequence::Close);
     fileMenu->addAction("Close &All", this, &MainWindow::onCloseAll, QKeySequence("Ctrl+Shift+W"));
     fileMenu->addSeparator();
+    fileMenu->addAction("&Metadata...", this, &MainWindow::onMetadata);
+    fileMenu->addSeparator();
     fileMenu->addAction("E&xit", this, &QWidget::close, QKeySequence::Quit);
 
     // --- Edit Menu ---
@@ -625,6 +627,18 @@ void MainWindow::onClose() {
 
 void MainWindow::onCloseAll() {
     closeAllDocuments();
+}
+
+void MainWindow::onMetadata() {
+    if (!m_doc) return;
+
+    MetadataDialog dlg(m_doc.get(), this);
+    if (dlg.exec() == QDialog::Accepted) {
+        Metadata newMeta = dlg.metadata();
+        if (newMeta != m_doc->metadata()) {
+            m_doc->setMetadata(newMeta, true);
+        }
+    }
 }
 
 void MainWindow::onCut() {

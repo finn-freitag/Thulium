@@ -10,6 +10,10 @@
 #include <QGridLayout>
 #include <QGuiApplication>
 #include <QClipboard>
+#include <QTextEdit>
+#include <QPushButton>
+#include <QGroupBox>
+#include <QDateTime>
 
 namespace pdn {
 
@@ -301,6 +305,104 @@ void NewImageDialog::onPresetChanged(int index) {
         QSize sz = data.toSize();
         m_widthSpin->setValue(sz.width());
         m_heightSpin->setValue(sz.height());
+    }
+}
+
+// --- MetadataDialog ---
+MetadataDialog::MetadataDialog(const Document* doc, QWidget* parent)
+    : QDialog(parent) {
+    setWindowTitle("Metadata");
+    resize(520, 480);
+
+    QVBoxLayout* mainLayout = new QVBoxLayout(this);
+
+    if (doc) {
+        m_initialMetadata = doc->metadata();
+
+        QGroupBox* infoGroup = new QGroupBox("Image Information", this);
+        QFormLayout* infoLayout = new QFormLayout(infoGroup);
+        infoLayout->addRow("File:", new QLabel(doc->fileName(), this));
+        infoLayout->addRow("Dimensions:", new QLabel(QString("%1 x %2 pixels (%3 DPI)")
+                                                          .arg(doc->width()).arg(doc->height()).arg(doc->dpi()), this));
+        infoLayout->addRow("Layers:", new QLabel(QString::number(doc->layerCount()), this));
+        mainLayout->addWidget(infoGroup);
+    }
+
+    QGroupBox* metaGroup = new QGroupBox("Metadata Properties", this);
+    QFormLayout* form = new QFormLayout(metaGroup);
+
+    m_titleEdit = new QLineEdit(m_initialMetadata.title, this);
+    m_titleEdit->setPlaceholderText("Image title or heading");
+    form->addRow("Title:", m_titleEdit);
+
+    m_authorEdit = new QLineEdit(m_initialMetadata.author, this);
+    m_authorEdit->setPlaceholderText("Creator or artist name");
+    form->addRow("Author / Artist:", m_authorEdit);
+
+    m_copyrightEdit = new QLineEdit(m_initialMetadata.copyright, this);
+    m_copyrightEdit->setPlaceholderText("e.g. Copyright (C) 2026");
+    form->addRow("Copyright:", m_copyrightEdit);
+
+    m_descriptionEdit = new QTextEdit(this);
+    m_descriptionEdit->setPlainText(m_initialMetadata.description);
+    m_descriptionEdit->setPlaceholderText("Detailed description or comments...");
+    m_descriptionEdit->setMaximumHeight(90);
+    form->addRow("Description:", m_descriptionEdit);
+
+    QHBoxLayout* dateLayout = new QHBoxLayout();
+    m_creationDateEdit = new QLineEdit(m_initialMetadata.creationDate, this);
+    m_creationDateEdit->setPlaceholderText("YYYY-MM-DDTHH:MM:SS");
+    QPushButton* nowBtn = new QPushButton("Now", this);
+    nowBtn->setToolTip("Set to current date and time");
+    connect(nowBtn, &QPushButton::clicked, this, &MetadataDialog::onSetCurrentDateTime);
+    dateLayout->addWidget(m_creationDateEdit);
+    dateLayout->addWidget(nowBtn);
+    form->addRow("Date / Time:", dateLayout);
+
+    m_softwareEdit = new QLineEdit(m_initialMetadata.software, this);
+    form->addRow("Software:", m_softwareEdit);
+
+    mainLayout->addWidget(metaGroup);
+
+    // Buttons
+    QHBoxLayout* btnLayout = new QHBoxLayout();
+    QPushButton* clearBtn = new QPushButton("Clear All Metadata", this);
+    connect(clearBtn, &QPushButton::clicked, this, &MetadataDialog::onClearAll);
+    btnLayout->addWidget(clearBtn);
+
+    btnLayout->addStretch();
+
+    QDialogButtonBox* bbox = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, this);
+    connect(bbox, &QDialogButtonBox::accepted, this, &QDialog::accept);
+    connect(bbox, &QDialogButtonBox::rejected, this, &QDialog::reject);
+    btnLayout->addWidget(bbox);
+
+    mainLayout->addLayout(btnLayout);
+}
+
+Metadata MetadataDialog::metadata() const {
+    Metadata meta;
+    meta.title = m_titleEdit ? m_titleEdit->text().trimmed() : QString();
+    meta.author = m_authorEdit ? m_authorEdit->text().trimmed() : QString();
+    meta.copyright = m_copyrightEdit ? m_copyrightEdit->text().trimmed() : QString();
+    meta.description = m_descriptionEdit ? m_descriptionEdit->toPlainText().trimmed() : QString();
+    meta.creationDate = m_creationDateEdit ? m_creationDateEdit->text().trimmed() : QString();
+    meta.software = m_softwareEdit ? m_softwareEdit->text().trimmed() : QString();
+    return meta;
+}
+
+void MetadataDialog::onClearAll() {
+    if (m_titleEdit) m_titleEdit->clear();
+    if (m_authorEdit) m_authorEdit->clear();
+    if (m_copyrightEdit) m_copyrightEdit->clear();
+    if (m_descriptionEdit) m_descriptionEdit->clear();
+    if (m_creationDateEdit) m_creationDateEdit->clear();
+    if (m_softwareEdit) m_softwareEdit->clear();
+}
+
+void MetadataDialog::onSetCurrentDateTime() {
+    if (m_creationDateEdit) {
+        m_creationDateEdit->setText(QDateTime::currentDateTime().toString(Qt::ISODate));
     }
 }
 

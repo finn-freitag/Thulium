@@ -103,14 +103,25 @@ std::shared_ptr<Document> PdnFormat::load(const QString& filePath, QString* erro
     int width = 0;
     int height = 0;
     int layerCount = 0;
+    Metadata meta;
 
     while (!xml.atEnd() && !xml.hasError()) {
         QXmlStreamReader::TokenType token = xml.readNext();
         if (token == QXmlStreamReader::StartElement) {
-            if (xml.name().toString() == "pdnImage") {
+            QString name = xml.name().toString();
+            if (name == "pdnImage") {
                 width = xml.attributes().value("width").toInt();
                 height = xml.attributes().value("height").toInt();
                 layerCount = xml.attributes().value("layers").toInt();
+            } else if (name == "metadata") {
+                auto attrs = xml.attributes();
+                if (attrs.hasAttribute("title")) meta.title = attrs.value("title").toString();
+                if (attrs.hasAttribute("author")) meta.author = attrs.value("author").toString();
+                if (attrs.hasAttribute("copyright")) meta.copyright = attrs.value("copyright").toString();
+                if (attrs.hasAttribute("description")) meta.description = attrs.value("description").toString();
+                if (attrs.hasAttribute("creationDate")) meta.creationDate = attrs.value("creationDate").toString();
+                if (attrs.hasAttribute("creationTime")) meta.creationDate = attrs.value("creationTime").toString();
+                if (attrs.hasAttribute("software")) meta.software = attrs.value("software").toString();
             }
         }
     }
@@ -258,6 +269,7 @@ std::shared_ptr<Document> PdnFormat::load(const QString& filePath, QString* erro
 
     doc->setActiveLayerIndex(doc->layerCount() - 1);
     doc->setFilePath(filePath);
+    doc->setMetadata(meta, false);
     return doc;
 }
 
@@ -272,7 +284,7 @@ bool PdnFormat::save(const Document& doc, const QString& filePath, QString* erro
     int height = doc.height();
     int layerCount = doc.layerCount();
 
-    // 1. Generate XML header with thumbnail
+    // 1. Generate XML header with thumbnail and metadata
     QImage thumb = doc.composite().scaled(160, 120, Qt::KeepAspectRatio, Qt::SmoothTransformation);
     QByteArray thumbBytes;
     QBuffer thumbBuffer(&thumbBytes);
@@ -280,9 +292,30 @@ bool PdnFormat::save(const Document& doc, const QString& filePath, QString* erro
     thumb.save(&thumbBuffer, "PNG");
     QString thumbBase64 = QString::fromLatin1(thumbBytes.toBase64());
 
+    QString customContent = QString("<thumb png=\"%1\" />").arg(thumbBase64);
+    const auto& meta = doc.metadata();
+    if (!meta.isEmpty() || !meta.title.isEmpty() || !meta.author.isEmpty() ||
+        !meta.copyright.isEmpty() || !meta.description.isEmpty() || !meta.creationDate.isEmpty()) {
+        auto escapeXml = [](const QString& str) {
+            QString s = str;
+            s.replace("&", "&amp;");
+            s.replace("\"", "&quot;");
+            s.replace("<", "&lt;");
+            s.replace(">", "&gt;");
+            return s;
+        };
+        customContent += QString("<metadata title=\"%1\" author=\"%2\" copyright=\"%3\" description=\"%4\" creationDate=\"%5\" software=\"%6\" />")
+                             .arg(escapeXml(meta.title))
+                             .arg(escapeXml(meta.author))
+                             .arg(escapeXml(meta.copyright))
+                             .arg(escapeXml(meta.description))
+                             .arg(escapeXml(meta.creationDate))
+                             .arg(escapeXml(meta.software));
+    }
+
     QString xmlStr = QString("<pdnImage width=\"%1\" height=\"%2\" layers=\"%3\" savedWithVersion=\"4.312.8267.29064\">"
-                             "<custom><thumb png=\"%4\" /></custom></pdnImage>")
-                         .arg(width).arg(height).arg(layerCount).arg(thumbBase64);
+                             "<custom>%4</custom></pdnImage>")
+                         .arg(width).arg(height).arg(layerCount).arg(customContent);
     QByteArray xmlBytes = xmlStr.toUtf8();
     uint32_t xmlLen = static_cast<uint32_t>(xmlBytes.size());
 

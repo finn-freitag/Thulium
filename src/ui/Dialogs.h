@@ -7,6 +7,7 @@
 #include <QSpinBox>
 #include <QComboBox>
 #include <QButtonGroup>
+#include <QTextEdit>
 #include <memory>
 #include "../core/Document.h"
 
@@ -99,6 +100,28 @@ private:
     QSpinBox* m_widthSpin;
     QSpinBox* m_heightSpin;
     QComboBox* m_presetCombo;
+};
+
+class MetadataDialog : public QDialog {
+    Q_OBJECT
+public:
+    explicit MetadataDialog(const Document* doc, QWidget* parent = nullptr);
+
+    Metadata metadata() const;
+
+public slots:
+    void onClearAll();
+    void onSetCurrentDateTime();
+
+private:
+    QLineEdit* m_titleEdit = nullptr;
+    QLineEdit* m_authorEdit = nullptr;
+    QLineEdit* m_copyrightEdit = nullptr;
+    QTextEdit* m_descriptionEdit = nullptr;
+    QLineEdit* m_creationDateEdit = nullptr;
+    QLineEdit* m_softwareEdit = nullptr;
+
+    Metadata m_initialMetadata;
 };
 
 } // namespace pdn

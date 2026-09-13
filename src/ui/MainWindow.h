@@ -70,6 +70,7 @@ private slots:
     bool onSaveAll();
     void onClose();
     void onCloseAll();
+    void onMetadata();
 
     // Edit
     void onCut();

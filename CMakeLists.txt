@@ -31,6 +31,7 @@ set(PDN_SOURCES
     src/core/Selection.cpp
     src/core/Document.h
     src/core/Document.cpp
+    src/core/Metadata.h
     src/core/History.h
     src/core/History.cpp
     src/core/Resampling.h
@@ -147,4 +148,8 @@ add_test(NAME test_image_operations COMMAND test_image_operations)
 add_executable(test_multi_document tests/test_multi_document.cpp)
 target_link_libraries(test_multi_document PRIVATE pdn_core)
 add_test(NAME test_multi_document COMMAND test_multi_document)
+
+add_executable(test_metadata tests/test_metadata.cpp)
+target_link_libraries(test_metadata PRIVATE pdn_core)
+add_test(NAME test_metadata COMMAND test_metadata "${CMAKE_CURRENT_SOURCE_DIR}/Card.pdn")
 

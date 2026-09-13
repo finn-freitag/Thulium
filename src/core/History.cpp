@@ -207,4 +207,20 @@ void FlattenUndoCommand::redo() {
     m_doc->setLayers(m_newLayers, m_newActiveIndex);
 }
 
+MetadataUndoCommand::MetadataUndoCommand(Document* doc, const Metadata& oldMeta, const Metadata& newMeta, const QString& text)
+    : QUndoCommand(text), m_doc(doc), m_oldMeta(oldMeta), m_newMeta(newMeta), m_firstRedo(true) {
+}
+
+void MetadataUndoCommand::undo() {
+    m_doc->setMetadataInternal(m_oldMeta);
+}
+
+void MetadataUndoCommand::redo() {
+    if (m_firstRedo) {
+        m_firstRedo = false;
+        return;
+    }
+    m_doc->setMetadataInternal(m_newMeta);
+}
+
 } // namespace pdn

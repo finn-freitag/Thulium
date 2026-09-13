@@ -8,6 +8,7 @@
 #include "Layer.h"
 #include "Selection.h"
 #include "Resampling.h"
+#include "Metadata.h"
 
 namespace pdn {
 
@@ -30,6 +31,10 @@ public:
     QString customTitle() const { return m_customTitle; }
     void setTitle(const QString& title);
     bool isModified() const;
+
+    const Metadata& metadata() const { return m_metadata; }
+    void setMetadata(const Metadata& meta, bool recordUndo = true);
+    void setMetadataInternal(const Metadata& meta);
 
     QUndoStack* undoStack() { return &m_undoStack; }
     void clearLayers();
@@ -90,6 +95,7 @@ public:
 
 signals:
     void documentChanged();
+    void metadataChanged();
     void layerCountChanged();
     void activeLayerChanged(int index);
     void layerPropertiesChanged(int index);
@@ -101,6 +107,7 @@ private:
     double m_dpi = 96.0;
     QString m_filePath;
     QString m_customTitle;
+    Metadata m_metadata;
     QList<std::shared_ptr<Layer>> m_layers;
     int m_activeLayerIndex = 0;
     Selection m_selection;

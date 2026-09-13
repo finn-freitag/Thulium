@@ -48,6 +48,23 @@ bool Document::isModified() const {
     return !m_undoStack.isClean();
 }
 
+void Document::setMetadata(const Metadata& meta, bool recordUndo) {
+    if (m_metadata == meta) return;
+    if (recordUndo) {
+        Metadata oldMeta = m_metadata;
+        setMetadataInternal(meta);
+        m_undoStack.push(new MetadataUndoCommand(this, oldMeta, meta));
+    } else {
+        setMetadataInternal(meta);
+    }
+}
+
+void Document::setMetadataInternal(const Metadata& meta) {
+    m_metadata = meta;
+    emit metadataChanged();
+    emit documentChanged();
+}
+
 std::shared_ptr<Layer> Document::layer(int index) const {
     if (index >= 0 && index < m_layers.size()) {
         return m_layers.at(index);

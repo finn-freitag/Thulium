@@ -152,4 +152,18 @@ private:
     bool m_firstRedo = true;
 };
 
+class MetadataUndoCommand : public QUndoCommand {
+public:
+    MetadataUndoCommand(Document* doc, const Metadata& oldMeta, const Metadata& newMeta, const QString& text = "Edit Metadata");
+
+    void undo() override;
+    void redo() override;
+
+private:
+    Document* m_doc;
+    Metadata m_oldMeta;
+    Metadata m_newMeta;
+    bool m_firstRedo = true;
+};
+
 } // namespace pdn
