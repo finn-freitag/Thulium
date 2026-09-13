@@ -951,6 +951,73 @@ int main(int argc, char* argv[]) {
         std::cout << "  Passed: Move selection tool (outline only, 15-deg snapping, right-click rotate) works properly!" << std::endl;
     }
 
+    // Test 14: Viewbox scroll boundaries (image border never passes viewbox center)
+    {
+        std::cout << "Test 14: Viewbox scroll boundaries..." << std::endl;
+        pdn::ToolManager toolMgr;
+        pdn::CanvasView canvas(&toolMgr);
+        auto doc = std::make_shared<pdn::Document>(400, 200);
+        canvas.setDocument(doc);
+        canvas.resize(800, 600);
+        canvas.toggleRulers(false); // viewW = 800, viewH = 600
+        canvas.setZoom(1.0);
+
+        // Center of viewbox is (400, 300).
+        // Document size is 400 x 200.
+        // 1. Scroll left far into negative X:
+        // Right border of image must stop at horizontal center (400)
+        // Right border = panOffset.x() + docW = panOffset.x() + 400.
+        // So panOffset.x() must clamp to 400 - 400 = 0.
+        canvas.setPanOffset(QPointF(-1000, 100));
+        assert(canvas.panOffset().x() == 0.0);
+        // Right border is at panOffset.x() + 400 = 400 (viewbox center)
+        assert(canvas.panOffset().x() + doc->width() * canvas.zoom() == 400.0);
+
+        // 2. Scroll right far into positive X:
+        // Left border of image must stop at horizontal center (400)
+        // Left border = panOffset.x().
+        // So panOffset.x() must clamp to 400.
+        canvas.setPanOffset(QPointF(1000, 100));
+        assert(canvas.panOffset().x() == 400.0);
+
+        // 3. Scroll up far into negative Y:
+        // Bottom border of image must stop at vertical center (300)
+        // Bottom border = panOffset.y() + docH = panOffset.y() + 200.
+        // So panOffset.y() must clamp to 300 - 200 = 100.
+        canvas.setPanOffset(QPointF(200, -1000));
+        assert(canvas.panOffset().y() == 100.0);
+        assert(canvas.panOffset().y() + doc->height() * canvas.zoom() == 300.0);
+
+        // 4. Scroll down far into positive Y:
+        // Top border of image must stop at vertical center (300)
+        // Top border = panOffset.y().
+        // So panOffset.y() must clamp to 300.
+        canvas.setPanOffset(QPointF(200, 1000));
+        assert(canvas.panOffset().y() == 300.0);
+
+        // 5. Test with Zoom = 2.0 (docW = 800, docH = 400):
+        canvas.setZoom(2.0);
+        // Scroll left: right border at 400 -> panOffset.x() = 400 - 800 = -400.
+        canvas.setPanOffset(QPointF(-2000, 100));
+        assert(canvas.panOffset().x() == -400.0);
+        assert(canvas.panOffset().x() + doc->width() * canvas.zoom() == 400.0);
+
+        // Scroll right: left border at 400 -> panOffset.x() = 400.
+        canvas.setPanOffset(QPointF(2000, 100));
+        assert(canvas.panOffset().x() == 400.0);
+
+        // Scroll up: bottom border at 300 -> panOffset.y() = 300 - 400 = -100.
+        canvas.setPanOffset(QPointF(0, -2000));
+        assert(canvas.panOffset().y() == -100.0);
+        assert(canvas.panOffset().y() + doc->height() * canvas.zoom() == 300.0);
+
+        // Scroll down: top border at 300 -> panOffset.y() = 300.
+        canvas.setPanOffset(QPointF(0, 2000));
+        assert(canvas.panOffset().y() == 300.0);
+
+        std::cout << "  Passed: Image cannot scroll off viewbox; borders clamp at viewbox center across all 4 directions!" << std::endl;
+    }
+
     std::cout << "=== All Tests Passed Successfully! ===" << std::endl;
     return 0;
 }

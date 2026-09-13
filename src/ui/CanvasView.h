@@ -27,6 +27,7 @@ public:
 
     void setPanOffset(const QPointF& offset);
     QPointF panOffset() const { return m_renderOpts.panOffset; }
+    QPointF clampPanOffset(const QPointF& offset) const;
 
     void togglePixelGrid(bool enabled);
     void toggleRulers(bool enabled);

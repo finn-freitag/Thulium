@@ -30,8 +30,7 @@ CanvasView::CanvasView(ToolManager* toolMgr, QWidget* parent)
     auto panTool = std::dynamic_pointer_cast<PanTool>(m_toolMgr->tool(ToolType::Pan));
     if (panTool) {
         panTool->onPan = [this](const QPointF& delta) {
-            m_renderOpts.panOffset += delta;
-            update();
+            setPanOffset(m_renderOpts.panOffset + delta);
         };
     }
     auto zoomTool = std::dynamic_pointer_cast<ZoomTool>(m_toolMgr->tool(ToolType::Zoom));
@@ -53,7 +52,10 @@ void CanvasView::setDocument(std::shared_ptr<Document> doc) {
     m_doc = doc;
     if (m_doc) {
         m_toolMgr->setDocument(m_doc.get());
-        connect(m_doc.get(), &Document::documentChanged, this, QOverload<>::of(&CanvasView::update));
+        connect(m_doc.get(), &Document::documentChanged, this, [this]() {
+            m_renderOpts.panOffset = clampPanOffset(m_renderOpts.panOffset);
+            update();
+        });
         connect(m_doc.get(), &Document::selectionChanged, this, QOverload<>::of(&CanvasView::update));
         zoomToWindow();
     }
@@ -91,8 +93,8 @@ void CanvasView::setZoom(double z, const QPointF& centerDocPos) {
     qreal vpCenterY = m_renderOpts.panOffset.y() + center.y() * oldZoom;
 
     m_renderOpts.zoom = newZoom;
-    m_renderOpts.panOffset.setX(vpCenterX - center.x() * newZoom);
-    m_renderOpts.panOffset.setY(vpCenterY - center.y() * newZoom);
+    QPointF newPan(vpCenterX - center.x() * newZoom, vpCenterY - center.y() * newZoom);
+    m_renderOpts.panOffset = clampPanOffset(newPan);
 
     emit zoomChanged(m_renderOpts.zoom);
     update();
@@ -123,16 +125,39 @@ void CanvasView::zoomToWindow() {
     if (fitZoom > 1.0) fitZoom = 1.0;
 
     m_renderOpts.zoom = fitZoom;
-    m_renderOpts.panOffset.setX((availW + 40 - m_doc->width() * fitZoom) / 2.0);
-    m_renderOpts.panOffset.setY((availH + 40 - m_doc->height() * fitZoom) / 2.0);
+    QPointF newPan((availW + 40 - m_doc->width() * fitZoom) / 2.0,
+                   (availH + 40 - m_doc->height() * fitZoom) / 2.0);
+    m_renderOpts.panOffset = clampPanOffset(newPan);
 
     emit zoomChanged(m_renderOpts.zoom);
     update();
 }
 
 void CanvasView::setPanOffset(const QPointF& offset) {
-    m_renderOpts.panOffset = offset;
+    m_renderOpts.panOffset = clampPanOffset(offset);
     update();
+}
+
+QPointF CanvasView::clampPanOffset(const QPointF& offset) const {
+    if (!m_doc) return offset;
+
+    int rOffset = m_renderOpts.showRulers ? m_rulerWidth : 0;
+    qreal viewW = width() - rOffset;
+    qreal viewH = height() - rOffset;
+    if (viewW <= 0 || viewH <= 0) return offset;
+
+    qreal docW = m_doc->width() * m_renderOpts.zoom;
+    qreal docH = m_doc->height() * m_renderOpts.zoom;
+
+    qreal minPanX = viewW / 2.0 - docW;
+    qreal maxPanX = viewW / 2.0;
+    qreal minPanY = viewH / 2.0 - docH;
+    qreal maxPanY = viewH / 2.0;
+
+    qreal clampedX = std::clamp(offset.x(), minPanX, maxPanX);
+    qreal clampedY = std::clamp(offset.y(), minPanY, maxPanY);
+
+    return QPointF(clampedX, clampedY);
 }
 
 void CanvasView::togglePixelGrid(bool enabled) {
@@ -142,6 +167,7 @@ void CanvasView::togglePixelGrid(bool enabled) {
 
 void CanvasView::toggleRulers(bool enabled) {
     m_renderOpts.showRulers = enabled;
+    m_renderOpts.panOffset = clampPanOffset(m_renderOpts.panOffset);
     update();
 }
 
@@ -149,6 +175,7 @@ void CanvasView::resizeEvent(QResizeEvent* event) {
     QWidget::resizeEvent(event);
     int rOffset = m_renderOpts.showRulers ? m_rulerWidth : 0;
     m_renderer->resize(width() - rOffset, height() - rOffset);
+    m_renderOpts.panOffset = clampPanOffset(m_renderOpts.panOffset);
 }
 
 void CanvasView::drawRulers(QPainter& painter) {
@@ -264,8 +291,7 @@ void CanvasView::mouseMoveEvent(QMouseEvent* event) {
     if (m_spacePanning) {
         QPoint delta = event->pos() - m_lastMousePos;
         m_lastMousePos = event->pos();
-        m_renderOpts.panOffset += QPointF(delta.x(), delta.y());
-        update();
+        setPanOffset(m_renderOpts.panOffset + QPointF(delta.x(), delta.y()));
         return;
     }
 
@@ -310,12 +336,10 @@ void CanvasView::wheelEvent(QWheelEvent* event) {
     } else if (event->modifiers() & Qt::ShiftModifier) {
         // Horizontal scroll with Shift+Scroll
         qreal delta = event->angleDelta().y() != 0 ? event->angleDelta().y() : event->angleDelta().x();
-        m_renderOpts.panOffset.setX(m_renderOpts.panOffset.x() + delta / 2.0);
-        update();
+        setPanOffset(QPointF(m_renderOpts.panOffset.x() + delta / 2.0, m_renderOpts.panOffset.y()));
     } else {
         // Pan
-        m_renderOpts.panOffset += QPointF(event->angleDelta().x() / 2.0, event->angleDelta().y() / 2.0);
-        update();
+        setPanOffset(m_renderOpts.panOffset + QPointF(event->angleDelta().x() / 2.0, event->angleDelta().y() / 2.0));
     }
 }
 
