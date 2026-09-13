@@ -1,0 +1,53 @@
+# Build outputs
+build/
+bin/
+out/
+dist/
+cmake-build-*/
+
+# CMake generated files
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+Makefile
+compile_commands.json
+CTestTestfile.cmake
+Testing/
+
+# Qt / Auto-generated files
+*_autogen/
+*.moc
+moc_*.cpp
+qrc_*.cpp
+ui_*.h
+.qmake.stash
+
+# Compiled binaries and libraries
+*.o
+*.obj
+*.a
+*.lib
+*.so
+*.dylib
+*.dll
+*.exe
+
+# IDE and Editor configurations
+.vscode/
+.idea/
+*.user
+*.user.*
+*.kdev4
+.cache/
+
+# OS-specific files
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# Temporary files & logs
+*.log
+*.tmp
+*.bak
+
+*.pdn

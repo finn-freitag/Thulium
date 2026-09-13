@@ -1,0 +1,263 @@
+#include <QMimeData>
+#include "Dialogs.h"
+#include "../core/History.h"
+#include <QVBoxLayout>
+#include <QHBoxLayout>
+#include <QFormLayout>
+#include <QDialogButtonBox>
+#include <QLabel>
+#include <QRadioButton>
+#include <QGridLayout>
+#include <QGuiApplication>
+#include <QClipboard>
+
+namespace pdn {
+
+// --- LayerPropertiesDialog ---
+LayerPropertiesDialog::LayerPropertiesDialog(Document* doc, int layerIndex, QWidget* parent)
+    : QDialog(parent), m_doc(doc), m_layerIndex(layerIndex) {
+    setWindowTitle("Layer Properties");
+    setFixedSize(320, 240);
+
+    auto layer = doc->layer(layerIndex);
+    m_origName = layer ? layer->name() : "";
+    m_origVisible = layer ? layer->isVisible() : true;
+    m_origOpacity = layer ? layer->opacity() : 255;
+    m_origBlendMode = layer ? layer->blendMode() : BlendMode::Normal;
+
+    QVBoxLayout* mainLayout = new QVBoxLayout(this);
+    QFormLayout* form = new QFormLayout();
+
+    m_nameEdit = new QLineEdit(m_origName, this);
+    form->addRow("Name:", m_nameEdit);
+
+    m_visibleCheck = new QCheckBox("Visible", this);
+    m_visibleCheck->setChecked(m_origVisible);
+    form->addRow("", m_visibleCheck);
+
+    m_blendModeCombo = new QComboBox(this);
+    for (const auto& info : getAvailableBlendModes()) {
+        m_blendModeCombo->addItem(info.name, static_cast<int>(info.mode));
+    }
+    m_blendModeCombo->setCurrentIndex(m_blendModeCombo->findData(static_cast<int>(m_origBlendMode)));
+    form->addRow("Blending:", m_blendModeCombo);
+
+    QHBoxLayout* opLayout = new QHBoxLayout();
+    m_opacitySlider = new QSlider(Qt::Horizontal, this);
+    m_opacitySlider->setRange(0, 255);
+    m_opacitySlider->setValue(m_origOpacity);
+    m_opacitySpin = new QSpinBox(this);
+    m_opacitySpin->setRange(0, 255);
+    m_opacitySpin->setValue(m_origOpacity);
+    connect(m_opacitySlider, &QSlider::valueChanged, m_opacitySpin, &QSpinBox::setValue);
+    connect(m_opacitySpin, QOverload<int>::of(&QSpinBox::valueChanged), m_opacitySlider, &QSlider::setValue);
+    opLayout->addWidget(m_opacitySlider);
+    opLayout->addWidget(m_opacitySpin);
+    form->addRow("Opacity:", opLayout);
+
+    mainLayout->addLayout(form);
+
+    QDialogButtonBox* bbox = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, this);
+    connect(bbox, &QDialogButtonBox::accepted, this, [this]() {
+        applyChanges();
+        accept();
+    });
+    connect(bbox, &QDialogButtonBox::rejected, this, &QDialog::reject);
+    mainLayout->addWidget(bbox);
+}
+
+QString LayerPropertiesDialog::layerName() const { return m_nameEdit->text(); }
+bool LayerPropertiesDialog::isLayerVisible() const { return m_visibleCheck->isChecked(); }
+uint8_t LayerPropertiesDialog::opacity() const { return static_cast<uint8_t>(m_opacitySlider->value()); }
+BlendMode LayerPropertiesDialog::blendMode() const {
+    return static_cast<BlendMode>(m_blendModeCombo->currentData().toInt());
+}
+
+void LayerPropertiesDialog::applyChanges() {
+    auto layer = m_doc->layer(m_layerIndex);
+    if (!layer) return;
+
+    QString newN = layerName();
+    bool newV = isLayerVisible();
+    uint8_t newO = opacity();
+    BlendMode newB = blendMode();
+
+    m_doc->undoStack()->push(new LayerPropertyUndoCommand(m_doc, m_layerIndex,
+        m_origName, newN, m_origOpacity, newO, m_origBlendMode, newB, m_origVisible, newV));
+}
+
+// --- ResizeImageDialog ---
+ResizeImageDialog::ResizeImageDialog(int currentWidth, int currentHeight, QWidget* parent)
+    : QDialog(parent), m_origWidth(currentWidth), m_origHeight(currentHeight) {
+    setWindowTitle("Resize");
+    setFixedSize(300, 180);
+    m_aspectRatio = static_cast<double>(m_origWidth) / m_origHeight;
+
+    QVBoxLayout* mainLayout = new QVBoxLayout(this);
+    QFormLayout* form = new QFormLayout();
+
+    m_widthSpin = new QSpinBox(this);
+    m_widthSpin->setRange(1, 32768);
+    m_widthSpin->setValue(m_origWidth);
+
+    m_heightSpin = new QSpinBox(this);
+    m_heightSpin->setRange(1, 32768);
+    m_heightSpin->setValue(m_origHeight);
+
+    form->addRow("Width (pixels):", m_widthSpin);
+    form->addRow("Height (pixels):", m_heightSpin);
+
+    m_maintainAspectCheck = new QCheckBox("Maintain aspect ratio", this);
+    m_maintainAspectCheck->setChecked(true);
+    form->addRow("", m_maintainAspectCheck);
+
+    connect(m_widthSpin, QOverload<int>::of(&QSpinBox::valueChanged), this, &ResizeImageDialog::onWidthChanged);
+    connect(m_heightSpin, QOverload<int>::of(&QSpinBox::valueChanged), this, &ResizeImageDialog::onHeightChanged);
+
+    mainLayout->addLayout(form);
+
+    QDialogButtonBox* bbox = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, this);
+    connect(bbox, &QDialogButtonBox::accepted, this, &QDialog::accept);
+    connect(bbox, &QDialogButtonBox::rejected, this, &QDialog::reject);
+    mainLayout->addWidget(bbox);
+}
+
+int ResizeImageDialog::newWidth() const { return m_widthSpin->value(); }
+int ResizeImageDialog::newHeight() const { return m_heightSpin->value(); }
+
+void ResizeImageDialog::onWidthChanged(int w) {
+    if (m_updating || !m_maintainAspectCheck->isChecked()) return;
+    m_updating = true;
+    m_heightSpin->setValue(std::max(1, static_cast<int>(w / m_aspectRatio + 0.5)));
+    m_updating = false;
+}
+
+void ResizeImageDialog::onHeightChanged(int h) {
+    if (m_updating || !m_maintainAspectCheck->isChecked()) return;
+    m_updating = true;
+    m_widthSpin->setValue(std::max(1, static_cast<int>(h * m_aspectRatio + 0.5)));
+    m_updating = false;
+}
+
+// --- CanvasSizeDialog ---
+CanvasSizeDialog::CanvasSizeDialog(int currentWidth, int currentHeight, QWidget* parent)
+    : QDialog(parent), m_origWidth(currentWidth), m_origHeight(currentHeight) {
+    setWindowTitle("Canvas Size");
+    setFixedSize(320, 240);
+
+    QVBoxLayout* mainLayout = new QVBoxLayout(this);
+    QFormLayout* form = new QFormLayout();
+
+    m_widthSpin = new QSpinBox(this);
+    m_widthSpin->setRange(1, 32768);
+    m_widthSpin->setValue(m_origWidth);
+
+    m_heightSpin = new QSpinBox(this);
+    m_heightSpin->setRange(1, 32768);
+    m_heightSpin->setValue(m_origHeight);
+
+    form->addRow("Width (pixels):", m_widthSpin);
+    form->addRow("Height (pixels):", m_heightSpin);
+
+    mainLayout->addLayout(form);
+
+    // Anchor Grid (3x3)
+    QLabel* anchorLabel = new QLabel("Anchor:", this);
+    mainLayout->addWidget(anchorLabel);
+
+    QWidget* gridWidget = new QWidget(this);
+    QGridLayout* gridLayout = new QGridLayout(gridWidget);
+    gridLayout->setSpacing(2);
+    m_anchorGroup = new QButtonGroup(this);
+
+    const Qt::Alignment anchors[3][3] = {
+        { Qt::AlignTop | Qt::AlignLeft, Qt::AlignTop | Qt::AlignHCenter, Qt::AlignTop | Qt::AlignRight },
+        { Qt::AlignVCenter | Qt::AlignLeft, Qt::AlignCenter, Qt::AlignVCenter | Qt::AlignRight },
+        { Qt::AlignBottom | Qt::AlignLeft, Qt::AlignBottom | Qt::AlignHCenter, Qt::AlignBottom | Qt::AlignRight }
+    };
+
+    for (int r = 0; r < 3; ++r) {
+        for (int c = 0; c < 3; ++c) {
+            QRadioButton* rb = new QRadioButton(gridWidget);
+            if (r == 1 && c == 1) rb->setChecked(true); // Center default
+            gridLayout->addWidget(rb, r, c);
+            m_anchorGroup->addButton(rb, static_cast<int>(anchors[r][c]));
+        }
+    }
+    mainLayout->addWidget(gridWidget);
+
+    QDialogButtonBox* bbox = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, this);
+    connect(bbox, &QDialogButtonBox::accepted, this, &QDialog::accept);
+    connect(bbox, &QDialogButtonBox::rejected, this, &QDialog::reject);
+    mainLayout->addWidget(bbox);
+}
+
+int CanvasSizeDialog::newWidth() const { return m_widthSpin->value(); }
+int CanvasSizeDialog::newHeight() const { return m_heightSpin->value(); }
+Qt::Alignment CanvasSizeDialog::anchor() const {
+    return static_cast<Qt::Alignment>(m_anchorGroup->checkedId());
+}
+
+// --- NewImageDialog ---
+NewImageDialog::NewImageDialog(QWidget* parent) : QDialog(parent) {
+    setWindowTitle("New");
+    setFixedSize(300, 200);
+
+    QVBoxLayout* mainLayout = new QVBoxLayout(this);
+    QFormLayout* form = new QFormLayout();
+
+    m_presetCombo = new QComboBox(this);
+    m_presetCombo->addItem("Custom");
+    m_presetCombo->addItem("800 x 600 (SVGA)", QSize(800, 600));
+    m_presetCombo->addItem("1024 x 768 (XGA)", QSize(1024, 768));
+    m_presetCombo->addItem("1920 x 1080 (Full HD)", QSize(1920, 1080));
+    m_presetCombo->addItem("2560 x 1440 (2K QHD)", QSize(2560, 1440));
+    m_presetCombo->addItem("3840 x 2160 (4K UHD)", QSize(3840, 2160));
+
+    // Check clipboard for image
+    const QClipboard* clipboard = QGuiApplication::clipboard();
+    const QMimeData* mimeData = clipboard->mimeData();
+    if (mimeData && mimeData->hasImage()) {
+        QImage clipImg = qvariant_cast<QImage>(clipboard->image());
+        if (!clipImg.isNull()) {
+            m_presetCombo->insertItem(1, QString("Clipboard (%1 x %2)").arg(clipImg.width()).arg(clipImg.height()), clipImg.size());
+            m_presetCombo->setCurrentIndex(1);
+        }
+    }
+
+    form->addRow("Preset:", m_presetCombo);
+
+    m_widthSpin = new QSpinBox(this);
+    m_widthSpin->setRange(1, 32768);
+    m_widthSpin->setValue(800);
+
+    m_heightSpin = new QSpinBox(this);
+    m_heightSpin->setRange(1, 32768);
+    m_heightSpin->setValue(600);
+
+    form->addRow("Width (pixels):", m_widthSpin);
+    form->addRow("Height (pixels):", m_heightSpin);
+
+    connect(m_presetCombo, QOverload<int>::of(&QComboBox::currentIndexChanged), this, &NewImageDialog::onPresetChanged);
+
+    mainLayout->addLayout(form);
+
+    QDialogButtonBox* bbox = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, this);
+    connect(bbox, &QDialogButtonBox::accepted, this, &QDialog::accept);
+    connect(bbox, &QDialogButtonBox::rejected, this, &QDialog::reject);
+    mainLayout->addWidget(bbox);
+}
+
+int NewImageDialog::imageWidth() const { return m_widthSpin->value(); }
+int NewImageDialog::imageHeight() const { return m_heightSpin->value(); }
+
+void NewImageDialog::onPresetChanged(int index) {
+    QVariant data = m_presetCombo->itemData(index);
+    if (data.isValid()) {
+        QSize sz = data.toSize();
+        m_widthSpin->setValue(sz.width());
+        m_heightSpin->setValue(sz.height());
+    }
+}
+
+} // namespace pdn
