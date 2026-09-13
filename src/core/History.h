@@ -39,6 +39,7 @@ private:
 class LayerRemoveUndoCommand : public QUndoCommand {
 public:
     LayerRemoveUndoCommand(Document* doc, int index, const QString& text = "Delete Layer");
+    LayerRemoveUndoCommand(Document* doc, std::shared_ptr<Layer> removedLayer, int index, const QString& text = "Delete Layer");
 
     void undo() override;
     void redo() override;
@@ -47,6 +48,38 @@ private:
     Document* m_doc;
     std::shared_ptr<Layer> m_removedLayer;
     int m_index;
+    bool m_firstRedo = true;
+};
+
+class LayerMergeDownUndoCommand : public QUndoCommand {
+public:
+    LayerMergeDownUndoCommand(Document* doc, int bottomIndex,
+                             const QImage& oldBottomImage,
+                             std::shared_ptr<Layer> removedTopLayer,
+                             const QString& text = "Merge Layer Down");
+
+    void undo() override;
+    void redo() override;
+
+private:
+    Document* m_doc;
+    int m_bottomIndex;
+    QImage m_oldBottomImage;
+    std::shared_ptr<Layer> m_removedTopLayer;
+    bool m_firstRedo = true;
+};
+
+class LayerMoveUndoCommand : public QUndoCommand {
+public:
+    LayerMoveUndoCommand(Document* doc, int fromIndex, int toIndex, const QString& text = "Move Layer");
+
+    void undo() override;
+    void redo() override;
+
+private:
+    Document* m_doc;
+    int m_fromIndex;
+    int m_toIndex;
     bool m_firstRedo = true;
 };
 

@@ -303,6 +303,92 @@ int main(int argc, char* argv[]) {
         std::cout << "  Passed: Flatten Image properly restores all original layers on undo!" << std::endl;
     }
 
+    std::cout << "Test 10: Undo/Redo Layer Operations (Add, Delete, Duplicate, Move, Merge)..." << std::endl;
+    {
+        auto doc = std::make_shared<pdn::Document>(50, 50);
+        doc->activeLayer()->setName("Background");
+        doc->activeLayer()->fill(Qt::white);
+        assert(doc->layerCount() == 1);
+
+        // 1. Add Layer
+        auto l2 = doc->addLayer("Layer 2");
+        assert(doc->layerCount() == 2);
+        assert(doc->activeLayerIndex() == 1);
+        assert(doc->undoStack()->undoText() == "Add Layer");
+
+        doc->undoStack()->undo();
+        assert(doc->layerCount() == 1);
+        assert(doc->activeLayerIndex() == 0);
+
+        doc->undoStack()->redo();
+        assert(doc->layerCount() == 2);
+        assert(doc->layer(1)->name() == "Layer 2");
+
+        // 2. Duplicate Layer
+        auto l3 = doc->duplicateLayer(1);
+        assert(doc->layerCount() == 3);
+        assert(doc->activeLayerIndex() == 2);
+        assert(doc->undoStack()->undoText() == "Duplicate Layer");
+
+        doc->undoStack()->undo();
+        assert(doc->layerCount() == 2);
+
+        doc->undoStack()->redo();
+        assert(doc->layerCount() == 3);
+        assert(doc->layer(2)->name() == "Layer 2 (Copy)");
+
+        // 3. Move Layer Up & Down
+        doc->moveLayer(0, 1);
+        assert(doc->undoStack()->undoText() == "Move Layer Up");
+        assert(doc->layer(1)->name() == "Background");
+
+        doc->undoStack()->undo();
+        assert(doc->layer(0)->name() == "Background");
+
+        doc->undoStack()->redo();
+        assert(doc->layer(1)->name() == "Background");
+
+        // Move back down
+        doc->moveLayer(1, 0);
+        assert(doc->undoStack()->undoText() == "Move Layer Down");
+        assert(doc->layer(0)->name() == "Background");
+
+        // 4. Merge Layer Down
+        // Background is at 0 (white). Layer 2 is at 1. Draw red on Layer 2.
+        doc->layer(1)->image().setPixelColor(10, 10, Qt::red);
+        doc->mergeLayerDown(1);
+        assert(doc->layerCount() == 2);
+        assert(doc->undoStack()->undoText() == "Merge Layer Down");
+        // Merged pixel on Background
+        assert(doc->layer(0)->image().pixelColor(10, 10) == Qt::red);
+
+        // Undo merge down
+        doc->undoStack()->undo();
+        assert(doc->layerCount() == 3);
+        // Original Background at (10, 10) restored to white
+        assert(doc->layer(0)->image().pixelColor(10, 10) == Qt::white);
+        // Layer 2 at (10, 10) is red
+        assert(doc->layer(1)->image().pixelColor(10, 10) == Qt::red);
+
+        // Redo merge down
+        doc->undoStack()->redo();
+        assert(doc->layerCount() == 2);
+        assert(doc->layer(0)->image().pixelColor(10, 10) == Qt::red);
+
+        // 5. Delete Layer
+        doc->removeLayer(1);
+        assert(doc->layerCount() == 1);
+        assert(doc->undoStack()->undoText() == "Delete Layer");
+
+        doc->undoStack()->undo();
+        assert(doc->layerCount() == 2);
+
+        doc->undoStack()->redo();
+        assert(doc->layerCount() == 1);
+
+        std::cout << "  Passed: All layer operations support undo and redo!" << std::endl;
+    }
+
     std::cout << "\nALL IMAGE OPERATIONS AND RESAMPLING TESTS PASSED SUCCESSFULLY!" << std::endl;
     return 0;
 }

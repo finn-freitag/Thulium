@@ -61,7 +61,7 @@ void Document::setActiveLayerIndex(int index) {
     }
 }
 
-std::shared_ptr<Layer> Document::addLayer(const QString& name) {
+std::shared_ptr<Layer> Document::addLayer(const QString& name, bool recordUndo) {
     QString layerName = name;
     if (layerName.isEmpty()) {
         layerName = QString("Layer %1").arg(m_layers.size() + 1);
@@ -76,10 +76,14 @@ std::shared_ptr<Layer> Document::addLayer(const QString& name) {
     emit layerCountChanged();
     emit activeLayerChanged(m_activeLayerIndex);
     emit documentChanged();
+
+    if (recordUndo) {
+        m_undoStack.push(new LayerAddUndoCommand(this, newLayer, insertIndex, "Add Layer"));
+    }
     return newLayer;
 }
 
-void Document::insertLayer(int index, std::shared_ptr<Layer> layer) {
+void Document::insertLayer(int index, std::shared_ptr<Layer> layer, bool /*recordUndo*/) {
     if (!layer) return;
     int idx = std::clamp(index, 0, static_cast<int>(m_layers.size()));
     m_layers.insert(idx, layer);
@@ -97,7 +101,7 @@ void Document::clearLayers() {
     emit documentChanged();
 }
 
-std::shared_ptr<Layer> Document::removeLayer(int index) {
+std::shared_ptr<Layer> Document::removeLayer(int index, bool recordUndo) {
     if (m_layers.size() <= 1 || index < 0 || index >= m_layers.size()) {
         return nullptr; // Cannot remove last layer
     }
@@ -111,10 +115,14 @@ std::shared_ptr<Layer> Document::removeLayer(int index) {
     emit layerCountChanged();
     emit activeLayerChanged(m_activeLayerIndex);
     emit documentChanged();
+
+    if (recordUndo) {
+        m_undoStack.push(new LayerRemoveUndoCommand(this, removed, index, "Delete Layer"));
+    }
     return removed;
 }
 
-std::shared_ptr<Layer> Document::duplicateLayer(int index) {
+std::shared_ptr<Layer> Document::duplicateLayer(int index, bool recordUndo) {
     if (m_hasFloatingSelection) {
         bakeFloatingSelection();
     }
@@ -129,10 +137,14 @@ std::shared_ptr<Layer> Document::duplicateLayer(int index) {
     emit layerCountChanged();
     emit activeLayerChanged(m_activeLayerIndex);
     emit documentChanged();
+
+    if (recordUndo) {
+        m_undoStack.push(new LayerAddUndoCommand(this, dup, index + 1, "Duplicate Layer"));
+    }
     return dup;
 }
 
-bool Document::moveLayer(int fromIndex, int toIndex) {
+bool Document::moveLayer(int fromIndex, int toIndex, bool recordUndo) {
     if (fromIndex < 0 || fromIndex >= m_layers.size() ||
         toIndex < 0 || toIndex >= m_layers.size() ||
         fromIndex == toIndex) {
@@ -146,10 +158,15 @@ bool Document::moveLayer(int fromIndex, int toIndex) {
     emit layerCountChanged();
     emit activeLayerChanged(m_activeLayerIndex);
     emit documentChanged();
+
+    if (recordUndo) {
+        QString text = (toIndex > fromIndex) ? "Move Layer Up" : "Move Layer Down";
+        m_undoStack.push(new LayerMoveUndoCommand(this, fromIndex, toIndex, text));
+    }
     return true;
 }
 
-bool Document::mergeLayerDown(int index) {
+bool Document::mergeLayerDown(int index, bool recordUndo) {
     if (index <= 0 || index >= m_layers.size()) {
         return false; // Can't merge down bottom layer
     }
@@ -158,6 +175,11 @@ bool Document::mergeLayerDown(int index) {
     }
     auto topLayer = m_layers.at(index);
     auto bottomLayer = m_layers.at(index - 1);
+
+    QImage oldBottomImage;
+    if (recordUndo) {
+        oldBottomImage = bottomLayer->image().copy();
+    }
 
     // Blend topLayer onto bottomLayer
     int count = m_width * m_height;
@@ -170,6 +192,10 @@ bool Document::mergeLayerDown(int index) {
     emit layerCountChanged();
     emit activeLayerChanged(m_activeLayerIndex);
     emit documentChanged();
+
+    if (recordUndo) {
+        m_undoStack.push(new LayerMergeDownUndoCommand(this, index - 1, oldBottomImage, topLayer, "Merge Layer Down"));
+    }
     return true;
 }
 

@@ -1,5 +1,6 @@
 #include "LayersDock.h"
 #include "Dialogs.h"
+#include "../core/History.h"
 #include <QVBoxLayout>
 #include <QHBoxLayout>
 #include <QCheckBox>
@@ -29,8 +30,12 @@ void LayersDock::setupUI() {
         if (l) {
             bool visible = (item->checkState() == Qt::Checked);
             if (l->isVisible() != visible) {
-                l->setVisible(visible);
-                emit m_doc->documentChanged();
+                m_doc->undoStack()->push(new LayerPropertyUndoCommand(m_doc.get(), layerIdx,
+                    l->name(), l->name(),
+                    l->opacity(), l->opacity(),
+                    l->blendMode(), l->blendMode(),
+                    !visible, visible,
+                    "Layer Visibility"));
             }
         }
     });

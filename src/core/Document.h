@@ -39,12 +39,12 @@ public:
     int activeLayerIndex() const { return m_activeLayerIndex; }
     void setActiveLayerIndex(int index);
 
-    std::shared_ptr<Layer> addLayer(const QString& name = QString());
-    void insertLayer(int index, std::shared_ptr<Layer> layer);
-    std::shared_ptr<Layer> removeLayer(int index);
-    std::shared_ptr<Layer> duplicateLayer(int index);
-    bool moveLayer(int fromIndex, int toIndex);
-    bool mergeLayerDown(int index);
+    std::shared_ptr<Layer> addLayer(const QString& name = QString(), bool recordUndo = true);
+    void insertLayer(int index, std::shared_ptr<Layer> layer, bool recordUndo = false);
+    std::shared_ptr<Layer> removeLayer(int index, bool recordUndo = true);
+    std::shared_ptr<Layer> duplicateLayer(int index, bool recordUndo = true);
+    bool moveLayer(int fromIndex, int toIndex, bool recordUndo = true);
+    bool mergeLayerDown(int index, bool recordUndo = true);
 
     // Selection
     Selection& selection() { return m_selection; }

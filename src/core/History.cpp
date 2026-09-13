@@ -35,7 +35,7 @@ LayerAddUndoCommand::LayerAddUndoCommand(Document* doc, std::shared_ptr<Layer> l
 }
 
 void LayerAddUndoCommand::undo() {
-    m_doc->removeLayer(m_index);
+    m_doc->removeLayer(m_index, false);
 }
 
 void LayerAddUndoCommand::redo() {
@@ -43,7 +43,7 @@ void LayerAddUndoCommand::redo() {
         m_firstRedo = false;
         return;
     }
-    m_doc->insertLayer(m_index, m_layer);
+    m_doc->insertLayer(m_index, m_layer, false);
 }
 
 LayerRemoveUndoCommand::LayerRemoveUndoCommand(Document* doc, int index, const QString& text)
@@ -51,9 +51,13 @@ LayerRemoveUndoCommand::LayerRemoveUndoCommand(Document* doc, int index, const Q
     m_removedLayer = m_doc->layer(index);
 }
 
+LayerRemoveUndoCommand::LayerRemoveUndoCommand(Document* doc, std::shared_ptr<Layer> removedLayer, int index, const QString& text)
+    : QUndoCommand(text), m_doc(doc), m_removedLayer(removedLayer), m_index(index) {
+}
+
 void LayerRemoveUndoCommand::undo() {
     if (m_removedLayer) {
-        m_doc->insertLayer(m_index, m_removedLayer);
+        m_doc->insertLayer(m_index, m_removedLayer, false);
     }
 }
 
@@ -62,7 +66,48 @@ void LayerRemoveUndoCommand::redo() {
         m_firstRedo = false;
         return;
     }
-    m_doc->removeLayer(m_index);
+    m_doc->removeLayer(m_index, false);
+}
+
+LayerMergeDownUndoCommand::LayerMergeDownUndoCommand(Document* doc, int bottomIndex,
+                                                     const QImage& oldBottomImage,
+                                                     std::shared_ptr<Layer> removedTopLayer,
+                                                     const QString& text)
+    : QUndoCommand(text), m_doc(doc), m_bottomIndex(bottomIndex),
+      m_oldBottomImage(oldBottomImage), m_removedTopLayer(removedTopLayer) {
+}
+
+void LayerMergeDownUndoCommand::undo() {
+    auto bottom = m_doc->layer(m_bottomIndex);
+    if (bottom) {
+        bottom->setImage(m_oldBottomImage.copy());
+    }
+    m_doc->insertLayer(m_bottomIndex + 1, m_removedTopLayer, false);
+    emit m_doc->documentChanged();
+}
+
+void LayerMergeDownUndoCommand::redo() {
+    if (m_firstRedo) {
+        m_firstRedo = false;
+        return;
+    }
+    m_doc->mergeLayerDown(m_bottomIndex + 1, false);
+}
+
+LayerMoveUndoCommand::LayerMoveUndoCommand(Document* doc, int fromIndex, int toIndex, const QString& text)
+    : QUndoCommand(text), m_doc(doc), m_fromIndex(fromIndex), m_toIndex(toIndex) {
+}
+
+void LayerMoveUndoCommand::undo() {
+    m_doc->moveLayer(m_toIndex, m_fromIndex, false);
+}
+
+void LayerMoveUndoCommand::redo() {
+    if (m_firstRedo) {
+        m_firstRedo = false;
+        return;
+    }
+    m_doc->moveLayer(m_fromIndex, m_toIndex, false);
 }
 
 LayerPropertyUndoCommand::LayerPropertyUndoCommand(Document* doc, int index,
