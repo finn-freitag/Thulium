@@ -36,6 +36,7 @@ MainWindow::MainWindow(QWidget* parent)
 
 void MainWindow::newDocument(int width, int height) {
     m_doc = std::make_shared<Document>(width, height);
+    m_toolMgr->setDocument(m_doc.get());
     m_canvasView->setDocument(m_doc);
     m_historyDock->setDocument(m_doc);
     m_layersDock->setDocument(m_doc);
@@ -54,6 +55,7 @@ bool MainWindow::openFile(const QString& filePath) {
     }
 
     m_doc = doc;
+    m_toolMgr->setDocument(m_doc.get());
     m_canvasView->setDocument(m_doc);
     m_historyDock->setDocument(m_doc);
     m_layersDock->setDocument(m_doc);

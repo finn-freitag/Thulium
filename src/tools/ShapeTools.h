@@ -37,19 +37,38 @@ public:
     QString shortcut() const override { return "O"; }
     QCursor cursor() const override { return Qt::CrossCursor; }
 
+    void activate(Document* doc, ToolContext& ctx) override;
+    void deactivate(Document* doc, ToolContext& ctx) override;
+
     void mousePress(QMouseEvent* event, Document* doc, const QPointF& docPos, ToolContext& ctx) override;
     void mouseMove(QMouseEvent* event, Document* doc, const QPointF& docPos, ToolContext& ctx) override;
     void mouseRelease(QMouseEvent* event, Document* doc, const QPointF& docPos, ToolContext& ctx) override;
+    void keyPress(QKeyEvent* event, Document* doc, ToolContext& ctx) override;
+
     void drawOverlay(QPainter& painter, const RenderOptions& opts) override;
+
+    void commit(Document* doc, const ToolContext& ctx);
 
 private:
     void renderLine(QPainter& p, const ToolContext& ctx);
+    int hitTestHandle(const QPointF& docPos, double threshold) const;
+    double distanceToCurve(const QPointF& docPos, double& outT) const;
+
+    enum State {
+        Idle,
+        DrawingBaseLine,
+        AdjustingCurve,
+        DraggingHandle
+    };
+
+    State m_state = Idle;
+    int m_draggedHandle = -1; // 0=P1, 1=C1, 2=C2, 3=P2
 
     QPointF m_p1;
     QPointF m_p2;
     QPointF m_c1;
     QPointF m_c2;
-    int m_curveStage = 0; // 0 = not started, 1 = dragging line, 2 = adjusting curve
+
     QImage m_undoSnapshot;
     ToolContext m_currentCtx;
 };

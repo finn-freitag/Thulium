@@ -5,30 +5,35 @@
 
 namespace pdn {
 
-void TextTool::activate(Document* /*doc*/, ToolContext& /*ctx*/) {
+void TextTool::activate(Document* /*doc*/, ToolContext& ctx) {
+    m_currentCtx = ctx;
 }
 
 void TextTool::deactivate(Document* doc, ToolContext& ctx) {
+    m_currentCtx = ctx;
     commit(doc, ctx);
 }
 
 void TextTool::commit(Document* doc, const ToolContext& ctx) {
-    if (!m_active || m_text.isEmpty() || !doc) return;
-    auto layer = doc->activeLayer();
-    if (layer) {
-        QPainter p(&layer->image());
-        if (!doc->selection().isEmpty()) {
-            p.setClipPath(doc->selection().path());
+    if (!m_active || !doc) return;
+
+    if (!m_text.isEmpty()) {
+        auto layer = doc->activeLayer();
+        if (layer) {
+            QPainter p(&layer->image());
+            if (!doc->selection().isEmpty()) {
+                p.setClipPath(doc->selection().path());
+            }
+            p.setRenderHint(QPainter::TextAntialiasing, true);
+            p.setFont(ctx.font);
+            p.setPen(ctx.primaryColor);
+
+            QFontMetrics fm(ctx.font);
+            p.drawText(m_textPos + QPointF(0, fm.ascent()), m_text);
+            p.end();
+
+            doc->undoStack()->push(new LayerBitmapUndoCommand(doc, doc->activeLayerIndex(), m_undoSnapshot, "Text"));
         }
-        p.setRenderHint(QPainter::TextAntialiasing, true);
-        p.setFont(ctx.font);
-        p.setPen(ctx.primaryColor);
-
-        QFontMetrics fm(ctx.font);
-        p.drawText(m_textPos + QPointF(0, fm.ascent()), m_text);
-        p.end();
-
-        doc->undoStack()->push(new LayerBitmapUndoCommand(doc, doc->activeLayerIndex(), m_undoSnapshot, "Text"));
     }
 
     m_active = false;
@@ -37,6 +42,7 @@ void TextTool::commit(Document* doc, const ToolContext& ctx) {
 }
 
 void TextTool::mousePress(QMouseEvent* /*event*/, Document* doc, const QPointF& docPos, ToolContext& ctx) {
+    m_currentCtx = ctx;
     if (m_active) {
         commit(doc, ctx);
     }
@@ -52,6 +58,7 @@ void TextTool::mousePress(QMouseEvent* /*event*/, Document* doc, const QPointF& 
 }
 
 void TextTool::keyPress(QKeyEvent* event, Document* doc, ToolContext& ctx) {
+    m_currentCtx = ctx;
     if (!m_active) return;
 
     if (event->key() == Qt::Key_Escape) {
@@ -88,8 +95,8 @@ void TextTool::drawOverlay(QPainter& painter, const RenderOptions& opts) {
                   opts.panOffset.y() + m_textPos.y() * opts.zoom);
 
     painter.save();
-    painter.setPen(Qt::black);
-    QFont vpFont = painter.font();
+    painter.setPen(m_currentCtx.primaryColor);
+    QFont vpFont = m_currentCtx.font;
     vpFont.setPointSizeF(vpFont.pointSizeF() * opts.zoom);
     painter.setFont(vpFont);
 

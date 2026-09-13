@@ -7,6 +7,7 @@
 #include <QMouseEvent>
 #include <QKeyEvent>
 #include <QPainter>
+#include <functional>
 #include "../core/Document.h"
 #include "../rendering/IRenderer.h"
 
@@ -79,6 +80,13 @@ struct ToolContext {
     // Clone stamp
     QPointF cloneSource = QPointF(-1, -1);
     bool cloneSourceSet = false;
+
+    std::function<void()> onContextChanged;
+    void notifyChanged() {
+        if (onContextChanged) {
+            onContextChanged();
+        }
+    }
 };
 
 class ITool {

@@ -26,9 +26,13 @@ void RectangleSelectTool::mouseRelease(QMouseEvent* /*event*/, Document* doc, co
 
     QRectF rect(m_startPos, m_currentPos);
     rect = rect.normalized();
-    if (rect.width() > 0 && rect.height() > 0) {
+    if (rect.width() > 2 || rect.height() > 2) {
         doc->selection().addRect(rect, ctx.selectionCombineMode);
         emit doc->selectionChanged();
+    } else {
+        if (ctx.selectionCombineMode == SelectionCombineMode::Replace) {
+            doc->clearSelection();
+        }
     }
     emit doc->documentChanged();
 }
@@ -70,9 +74,13 @@ void EllipseSelectTool::mouseRelease(QMouseEvent* /*event*/, Document* doc, cons
 
     QRectF rect(m_startPos, m_currentPos);
     rect = rect.normalized();
-    if (rect.width() > 0 && rect.height() > 0) {
+    if (rect.width() > 2 || rect.height() > 2) {
         doc->selection().addEllipse(rect, ctx.selectionCombineMode);
         emit doc->selectionChanged();
+    } else {
+        if (ctx.selectionCombineMode == SelectionCombineMode::Replace) {
+            doc->clearSelection();
+        }
     }
     emit doc->documentChanged();
 }
@@ -112,9 +120,14 @@ void LassoSelectTool::mouseRelease(QMouseEvent* /*event*/, Document* doc, const 
     m_selecting = false;
     m_polygon << docPos;
 
-    if (m_polygon.size() >= 3) {
+    QRectF bounds = m_polygon.boundingRect();
+    if (m_polygon.size() >= 3 && (bounds.width() > 2 || bounds.height() > 2)) {
         doc->selection().addPolygon(m_polygon, ctx.selectionCombineMode);
         emit doc->selectionChanged();
+    } else {
+        if (ctx.selectionCombineMode == SelectionCombineMode::Replace) {
+            doc->clearSelection();
+        }
     }
     m_polygon.clear();
     emit doc->documentChanged();
@@ -140,7 +153,12 @@ void LassoSelectTool::drawOverlay(QPainter& painter, const RenderOptions& opts) 
 void MagicWandTool::mousePress(QMouseEvent* /*event*/, Document* doc, const QPointF& docPos, ToolContext& ctx) {
     int x = static_cast<int>(docPos.x());
     int y = static_cast<int>(docPos.y());
-    if (x < 0 || x >= doc->width() || y < 0 || y >= doc->height()) return;
+    if (x < 0 || x >= doc->width() || y < 0 || y >= doc->height()) {
+        if (ctx.selectionCombineMode == SelectionCombineMode::Replace) {
+            doc->clearSelection();
+        }
+        return;
+    }
 
     floodSelect(doc, x, y, ctx.tolerance, ctx.selectionCombineMode);
 }
@@ -163,6 +181,8 @@ void MagicWandTool::floodSelect(Document* doc, int startX, int startY, int toler
 
     auto matches = [&](int x, int y) -> bool {
         uint32_t px = bits[y * w + x];
+        if (px == targetColor) return true;
+        if (tolerance == 0) return false;
         int pr = (px >> 16) & 0xFF;
         int pg = (px >> 8) & 0xFF;
         int pb = px & 0xFF;
@@ -174,51 +194,60 @@ void MagicWandTool::floodSelect(Document* doc, int startX, int startY, int toler
     };
 
     std::vector<bool> visited(w * h, false);
-    QPainterPath wandPath;
-
-    // Scanline flood fill or BFS
-    QQueue<QPoint> queue;
-    queue.enqueue(QPoint(startX, startY));
+    std::vector<QPoint> queue;
+    queue.reserve(1024);
+    queue.push_back(QPoint(startX, startY));
     visited[startY * w + startX] = true;
 
-    QRegion matchingRegion;
-    QVector<QRect> rects;
+    size_t head = 0;
+    const int dx[] = { 0, 0, -1, 1 };
+    const int dy[] = { -1, 1, 0, 0 };
 
-    while (!queue.isEmpty()) {
-        QPoint pt = queue.dequeue();
+    while (head < queue.size()) {
+        QPoint pt = queue[head++];
         int cx = pt.x();
         int cy = pt.y();
 
-        // Expand horizontally
-        int left = cx;
-        while (left > 0 && !visited[cy * w + (left - 1)] && matches(left - 1, cy)) {
-            --left;
-            visited[cy * w + left] = true;
-        }
-
-        int right = cx;
-        while (right < w - 1 && !visited[cy * w + (right + 1)] && matches(right + 1, cy)) {
-            ++right;
-            visited[cy * w + right] = true;
-        }
-
-        rects.append(QRect(left, cy, right - left + 1, 1));
-
-        // Check above and below
-        for (int nx = left; nx <= right; ++nx) {
-            if (cy > 0 && !visited[(cy - 1) * w + nx] && matches(nx, cy - 1)) {
-                visited[(cy - 1) * w + nx] = true;
-                queue.enqueue(QPoint(nx, cy - 1));
-            }
-            if (cy < h - 1 && !visited[(cy + 1) * w + nx] && matches(nx, cy + 1)) {
-                visited[(cy + 1) * w + nx] = true;
-                queue.enqueue(QPoint(nx, cy + 1));
+        for (int i = 0; i < 4; ++i) {
+            int nx = cx + dx[i];
+            int ny = cy + dy[i];
+            if (nx >= 0 && nx < w && ny >= 0 && ny < h) {
+                int idx = ny * w + nx;
+                if (!visited[idx] && matches(nx, ny)) {
+                    visited[idx] = true;
+                    queue.push_back(QPoint(nx, ny));
+                }
             }
         }
     }
 
-    matchingRegion.setRects(rects.data(), rects.size());
-    wandPath.addRegion(matchingRegion);
+    // Build strictly sorted non-overlapping horizontal spans row-by-row
+    QVector<QRect> rects;
+    for (int y = 0; y < h; ++y) {
+        int start = -1;
+        int rowOffset = y * w;
+        for (int x = 0; x < w; ++x) {
+            if (visited[rowOffset + x]) {
+                if (start == -1) start = x;
+            } else {
+                if (start != -1) {
+                    rects.append(QRect(start, y, x - start, 1));
+                    start = -1;
+                }
+            }
+        }
+        if (start != -1) {
+            rects.append(QRect(start, y, w - start, 1));
+        }
+    }
+
+    QPainterPath wandPath;
+    if (!rects.isEmpty()) {
+        QRegion matchingRegion;
+        matchingRegion.setRects(rects.data(), rects.size());
+        wandPath.addRegion(matchingRegion);
+        wandPath = wandPath.simplified();
+    }
 
     doc->selection().addPath(wandPath, mode);
     emit doc->selectionChanged();

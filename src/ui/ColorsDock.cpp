@@ -58,6 +58,10 @@ void ColorWheelWidget::updateColorFromPos(const QPoint& pos) {
         double satRatio = std::clamp(dist / wheelRadius, 0.0, 1.0);
         m_saturation = static_cast<int>(satRatio * 255.0);
 
+        if (m_value == 0) {
+            m_value = 255;
+        }
+
         m_color.setHsv(m_hue, m_saturation, m_value, m_color.alpha());
         emit colorChanged(m_color);
         update();
@@ -103,26 +107,36 @@ void ColorWheelWidget::mouseReleaseEvent(QMouseEvent* /*event*/) {
 void ColorWheelWidget::renderWheelImage() {
     int wheelRadius = 60;
     int wheelDiameter = wheelRadius * 2;
-    m_cachedWheelImage = QImage(wheelDiameter, wheelDiameter, QImage::Format_ARGB32);
+    m_cachedWheelImage = QImage(wheelDiameter, wheelDiameter, QImage::Format_ARGB32_Premultiplied);
     m_cachedWheelImage.fill(Qt::transparent);
 
-    QPainter p(&m_cachedWheelImage);
-    p.setRenderHint(QPainter::Antialiasing, true);
-
     QPoint center(wheelRadius, wheelRadius);
-    for (int r = 0; r < wheelRadius; ++r) {
-        double sat = static_cast<double>(r) / wheelRadius;
-        for (int a = 0; a < 360; a += 2) {
-            QColor col;
-            col.setHsv(a, static_cast<int>(sat * 255), m_value);
-            p.setPen(col);
-            double rad = a * M_PI / 180.0;
-            p.drawPoint(center.x() + static_cast<int>(r * std::cos(rad)),
-                        center.y() - static_cast<int>(r * std::sin(rad)));
+    for (int y = 0; y < wheelDiameter; ++y) {
+        QRgb* line = reinterpret_cast<QRgb*>(m_cachedWheelImage.scanLine(y));
+        for (int x = 0; x < wheelDiameter; ++x) {
+            double dx = x - center.x();
+            double dy = y - center.y();
+            double dist = std::sqrt(dx * dx + dy * dy);
+
+            if (dist <= wheelRadius) {
+                double angle = std::atan2(-dy, dx) * 180.0 / M_PI;
+                if (angle < 0) angle += 360.0;
+                int hue = static_cast<int>(angle) % 360;
+                int sat = std::clamp(static_cast<int>((dist / wheelRadius) * 255.0), 0, 255);
+
+                double alpha = 1.0;
+                if (dist > wheelRadius - 1.0) {
+                    alpha = std::clamp(wheelRadius - dist, 0.0, 1.0);
+                }
+
+                QColor col;
+                col.setHsv(hue, sat, 255, static_cast<int>(alpha * 255.0));
+                line[x] = col.rgba();
+            } else {
+                line[x] = 0;
+            }
         }
     }
-    p.end();
-    m_cachedValue = m_value;
 }
 
 void ColorWheelWidget::paintEvent(QPaintEvent* /*event*/) {
@@ -132,7 +146,7 @@ void ColorWheelWidget::paintEvent(QPaintEvent* /*event*/) {
     int wheelRadius = 60;
     QPoint center(wheelRadius + 10, wheelRadius + 10);
 
-    if (m_cachedWheelImage.isNull() || m_cachedValue != m_value) {
+    if (m_cachedWheelImage.isNull()) {
         renderWheelImage();
     }
     p.drawImage(center.x() - wheelRadius, center.y() - wheelRadius, m_cachedWheelImage);
@@ -183,6 +197,7 @@ ColorsDock::ColorsDock(ToolManager* toolMgr, QWidget* parent)
     setAllowedAreas(Qt::LeftDockWidgetArea | Qt::RightDockWidgetArea);
     setupUI();
     updateUIFromActiveColor();
+    connect(m_toolMgr, &ToolManager::contextChanged, this, &ColorsDock::updateUIFromActiveColor);
 }
 
 void ColorsDock::setupUI() {

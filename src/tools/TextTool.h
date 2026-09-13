@@ -33,6 +33,7 @@ private:
     bool m_active = false;
     bool m_cursorVisible = true;
     QImage m_undoSnapshot;
+    ToolContext m_currentCtx;
 };
 
 } // namespace pdn

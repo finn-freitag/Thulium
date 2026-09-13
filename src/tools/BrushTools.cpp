@@ -159,6 +159,7 @@ void ColorPickerTool::sample(Document* doc, const QPointF& docPos, ToolContext& 
     } else {
         ctx.primaryColor = c;
     }
+    ctx.notifyChanged();
     emit doc->documentChanged();
 }
 

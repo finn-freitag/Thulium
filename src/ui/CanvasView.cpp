@@ -46,6 +46,7 @@ CanvasView::CanvasView(ToolManager* toolMgr, QWidget* parent)
 void CanvasView::setDocument(std::shared_ptr<Document> doc) {
     m_doc = doc;
     if (m_doc) {
+        m_toolMgr->setDocument(m_doc.get());
         connect(m_doc.get(), &Document::documentChanged, this, QOverload<>::of(&CanvasView::update));
         connect(m_doc.get(), &Document::selectionChanged, this, QOverload<>::of(&CanvasView::update));
         zoomToWindow();
@@ -298,6 +299,11 @@ void CanvasView::wheelEvent(QWheelEvent* event) {
         QPointF docPos = viewportToDoc(event->position());
         double factor = (event->angleDelta().y() > 0) ? 1.15 : 0.85;
         setZoom(m_renderOpts.zoom * factor, docPos);
+    } else if (event->modifiers() & Qt::ShiftModifier) {
+        // Horizontal scroll with Shift+Scroll
+        qreal delta = event->angleDelta().y() != 0 ? event->angleDelta().y() : event->angleDelta().x();
+        m_renderOpts.panOffset.setX(m_renderOpts.panOffset.x() + delta / 2.0);
+        update();
     } else {
         // Pan
         m_renderOpts.panOffset += QPointF(event->angleDelta().x() / 2.0, event->angleDelta().y() / 2.0);

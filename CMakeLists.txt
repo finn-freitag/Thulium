@@ -131,3 +131,8 @@ add_test(NAME test_effects COMMAND test_effects)
 add_executable(test_formats tests/test_formats.cpp)
 target_link_libraries(test_formats PRIVATE pdn_core)
 add_test(NAME test_formats COMMAND test_formats)
+
+add_executable(test_fixes tests/test_fixes.cpp)
+target_link_libraries(test_fixes PRIVATE pdn_core)
+add_test(NAME test_fixes COMMAND test_fixes)
+

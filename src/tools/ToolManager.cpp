@@ -32,6 +32,9 @@ ToolManager::ToolManager(QObject* parent) : QObject(parent) {
     registerTool(std::make_shared<ShapesTool>());
 
     m_activeToolType = ToolType::Paintbrush;
+    m_context.onContextChanged = [this]() {
+        emit contextChanged();
+    };
 }
 
 void ToolManager::registerTool(std::shared_ptr<ITool> tool) {
@@ -49,6 +52,9 @@ std::shared_ptr<ITool> ToolManager::activeTool() const {
 }
 
 void ToolManager::setActiveTool(ToolType type, Document* doc) {
+    if (!doc) {
+        doc = m_document;
+    }
     if (m_activeToolType != type && m_tools.contains(type)) {
         auto prevTool = activeTool();
         if (prevTool) {

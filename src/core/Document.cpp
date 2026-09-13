@@ -160,6 +160,7 @@ bool Document::mergeLayerDown(int index) {
 void Document::clearSelection() {
     m_selection.clear();
     emit selectionChanged();
+    emit documentChanged();
 }
 
 void Document::resizeCanvas(int newWidth, int newHeight, Qt::Alignment anchor) {
