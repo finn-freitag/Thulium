@@ -62,13 +62,15 @@ void PencilTool::mousePress(QMouseEvent* event, Document* doc, const QPointF& do
     m_lastPos = docPos;
     m_activeColor = (event->button() == Qt::RightButton) ? ctx.secondaryColor : ctx.primaryColor;
 
+    QPoint pt(static_cast<int>(std::floor(docPos.x())), static_cast<int>(std::floor(docPos.y())));
+
     QPainter p(&layer->image());
     if (!doc->selection().isEmpty()) {
         p.setClipPath(doc->selection().path());
     }
     p.setRenderHint(QPainter::Antialiasing, false);
     p.setPen(QPen(m_activeColor, 1, Qt::SolidLine, Qt::SquareCap, Qt::MiterJoin));
-    p.drawPoint(docPos.toPoint());
+    p.drawPoint(pt);
     p.end();
 
     emit doc->documentChanged();
@@ -79,17 +81,23 @@ void PencilTool::mouseMove(QMouseEvent* /*event*/, Document* doc, const QPointF&
     auto layer = doc->activeLayer();
     if (!layer) return;
 
-    QPainter p(&layer->image());
-    if (!doc->selection().isEmpty()) {
-        p.setClipPath(doc->selection().path());
+    QPoint lastPt(static_cast<int>(std::floor(m_lastPos.x())), static_cast<int>(std::floor(m_lastPos.y())));
+    QPoint curPt(static_cast<int>(std::floor(docPos.x())), static_cast<int>(std::floor(docPos.y())));
+
+    if (lastPt != curPt) {
+        QPainter p(&layer->image());
+        if (!doc->selection().isEmpty()) {
+            p.setClipPath(doc->selection().path());
+        }
+        p.setRenderHint(QPainter::Antialiasing, false);
+        p.setPen(QPen(m_activeColor, 1, Qt::SolidLine, Qt::SquareCap, Qt::MiterJoin));
+        p.drawLine(lastPt, curPt);
+        p.end();
+
+        emit doc->documentChanged();
     }
-    p.setRenderHint(QPainter::Antialiasing, false);
-    p.setPen(QPen(m_activeColor, 1, Qt::SolidLine, Qt::SquareCap, Qt::MiterJoin));
-    p.drawLine(m_lastPos.toPoint(), docPos.toPoint());
-    p.end();
 
     m_lastPos = docPos;
-    emit doc->documentChanged();
 }
 
 void PencilTool::mouseRelease(QMouseEvent* /*event*/, Document* doc, const QPointF& /*docPos*/, ToolContext& /*ctx*/) {

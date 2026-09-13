@@ -4,6 +4,7 @@
 #include "../src/core/Document.h"
 #include "../src/core/Resampling.h"
 #include "../src/ui/Dialogs.h"
+#include "../src/tools/BrushTools.h"
 
 int main(int argc, char* argv[]) {
     int fakeArgc = 1;
@@ -387,6 +388,46 @@ int main(int argc, char* argv[]) {
         assert(doc->layerCount() == 1);
 
         std::cout << "  Passed: All layer operations support undo and redo!" << std::endl;
+    }
+
+    std::cout << "Test 11: Pencil Tool Coordinate Accuracy (no 0.5px offset)..." << std::endl;
+    {
+        auto doc = std::make_shared<pdn::Document>(100, 100);
+        doc->activeLayer()->fill(Qt::white);
+
+        pdn::PencilTool pencil;
+        pdn::ToolContext ctx;
+        ctx.primaryColor = Qt::black;
+
+        // Click near bottom-right of pixel (10, 20), at (10.75, 20.75)
+        QMouseEvent pressEvent(QEvent::MouseButtonPress, QPointF(10.75, 20.75), Qt::LeftButton, Qt::LeftButton, Qt::NoModifier);
+        pencil.mousePress(&pressEvent, doc.get(), QPointF(10.75, 20.75), ctx);
+
+        // Pixel (10, 20) MUST be painted black
+        assert(doc->activeLayer()->image().pixelColor(10, 20) == Qt::black);
+        // Pixel (11, 21) MUST NOT be painted (which was the 0.5px rounding bug)
+        assert(doc->activeLayer()->image().pixelColor(11, 21) == Qt::white);
+
+        // Also test at (10.1, 20.1)
+        doc->activeLayer()->fill(Qt::white);
+        QMouseEvent pressEvent2(QEvent::MouseButtonPress, QPointF(10.1, 20.1), Qt::LeftButton, Qt::LeftButton, Qt::NoModifier);
+        pencil.mousePress(&pressEvent2, doc.get(), QPointF(10.1, 20.1), ctx);
+        assert(doc->activeLayer()->image().pixelColor(10, 20) == Qt::black);
+        assert(doc->activeLayer()->image().pixelColor(11, 21) == Qt::white);
+
+        // Drag to (12.8, 20.9)
+        QMouseEvent moveEvent(QEvent::MouseMove, QPointF(12.8, 20.9), Qt::LeftButton, Qt::LeftButton, Qt::NoModifier);
+        pencil.mouseMove(&moveEvent, doc.get(), QPointF(12.8, 20.9), ctx);
+
+        assert(doc->activeLayer()->image().pixelColor(11, 20) == Qt::black);
+        assert(doc->activeLayer()->image().pixelColor(12, 20) == Qt::black);
+        // Ensure neighbor (13, 21) is untouched
+        assert(doc->activeLayer()->image().pixelColor(13, 21) == Qt::white);
+
+        QMouseEvent releaseEvent(QEvent::MouseButtonRelease, QPointF(12.8, 20.9), Qt::LeftButton, Qt::NoButton, Qt::NoModifier);
+        pencil.mouseRelease(&releaseEvent, doc.get(), QPointF(12.8, 20.9), ctx);
+
+        std::cout << "  Passed: Pencil tool precisely paints targeted pixels without 0.5px offset!" << std::endl;
     }
 
     std::cout << "\nALL IMAGE OPERATIONS AND RESAMPLING TESTS PASSED SUCCESSFULLY!" << std::endl;
