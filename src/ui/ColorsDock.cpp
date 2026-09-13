@@ -238,6 +238,10 @@ void ColorsDock::setupUI() {
     topLayout->addWidget(m_secondaryBox);
     topLayout->addWidget(m_swapBtn);
     topLayout->addWidget(m_defaultBtn);
+    m_primaryBox->setFocusPolicy(Qt::NoFocus);
+    m_secondaryBox->setFocusPolicy(Qt::NoFocus);
+    m_swapBtn->setFocusPolicy(Qt::NoFocus);
+    m_defaultBtn->setFocusPolicy(Qt::NoFocus);
     topLayout->addStretch();
     layout->addLayout(topLayout);
 
@@ -251,6 +255,7 @@ void ColorsDock::setupUI() {
     swatchesLayout->setSpacing(2);
     for (int i = 0; i < 32; ++i) {
         QPushButton* sbtn = new QPushButton(container);
+        sbtn->setFocusPolicy(Qt::NoFocus);
         sbtn->setFixedSize(16, 16);
         QColor col = s_pdnSwatches[i];
         sbtn->setStyleSheet(QString("background-color: %1; border: 1px solid #888;").arg(col.name()));
@@ -263,6 +268,7 @@ void ColorsDock::setupUI() {
 
     // More >> / << Less button
     m_moreLessBtn = new QPushButton("More >>", container);
+    m_moreLessBtn->setFocusPolicy(Qt::NoFocus);
     connect(m_moreLessBtn, &QPushButton::clicked, this, &ColorsDock::onToggleMoreLess);
     layout->addWidget(m_moreLessBtn);
 

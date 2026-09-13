@@ -4,6 +4,8 @@
 #include "../effects/BrightnessContrast.h"
 #include "../effects/GaussianBlur.h"
 #include "../core/History.h"
+#include "../tools/TextTool.h"
+#include "../tools/ShapeTools.h"
 #include <QMenuBar>
 #include <QStatusBar>
 #include <QFileDialog>
@@ -11,7 +13,13 @@
 #include <QClipboard>
 #include <QGuiApplication>
 #include <QMimeData>
-#include <QPainter>
+#include <QKeyEvent>
+#include <QLineEdit>
+#include <QTextEdit>
+#include <QPlainTextEdit>
+#include <QSpinBox>
+#include <QDoubleSpinBox>
+#include <QApplication>
 
 namespace pdn {
 
@@ -21,6 +29,8 @@ MainWindow::MainWindow(QWidget* parent)
       m_pluginMgr(new PluginManager(this)) {
     setWindowTitle("Paint.NET Clone");
     resize(1200, 800);
+
+    qApp->installEventFilter(this);
 
     m_canvasView = new CanvasView(m_toolMgr, this);
     setCentralWidget(m_canvasView);
@@ -96,7 +106,8 @@ void MainWindow::setupMenus() {
     // --- Edit Menu ---
     QMenu* editMenu = mb->addMenu("&Edit");
     QAction* undoAct = editMenu->addAction("&Undo", this, [this]() { if (m_doc) m_doc->undoStack()->undo(); }, QKeySequence::Undo);
-    QAction* redoAct = editMenu->addAction("&Redo", this, [this]() { if (m_doc) m_doc->undoStack()->redo(); }, QKeySequence::Redo);
+    QAction* redoAct = editMenu->addAction("&Redo", this, [this]() { if (m_doc) m_doc->undoStack()->redo(); });
+    redoAct->setShortcuts({QKeySequence("Ctrl+Y"), QKeySequence("Ctrl+Shift+Z")});
     editMenu->addSeparator();
     editMenu->addAction("Cu&t", this, &MainWindow::onCut, QKeySequence::Cut);
     editMenu->addAction("&Copy", this, &MainWindow::onCopy, QKeySequence::Copy);
@@ -107,13 +118,17 @@ void MainWindow::setupMenus() {
     editMenu->addAction("&Fill Selection", this, &MainWindow::onFillSelection, QKeySequence(Qt::Key_Backspace));
     editMenu->addAction("&Invert Selection", this, &MainWindow::onInvertSelection, QKeySequence("Ctrl+I"));
     editMenu->addAction("Select &All", this, &MainWindow::onSelectAll, QKeySequence::SelectAll);
-    editMenu->addAction("&Deselect", this, &MainWindow::onDeselect, QKeySequence::Deselect);
+    QAction* deselectAct = editMenu->addAction("&Deselect", this, &MainWindow::onDeselect);
+    deselectAct->setShortcuts({QKeySequence("Ctrl+D"), QKeySequence("Ctrl+Shift+A")});
 
     // --- View Menu ---
     QMenu* viewMenu = mb->addMenu("&View");
-    viewMenu->addAction("Zoom &In", m_canvasView, &CanvasView::zoomIn, QKeySequence::ZoomIn);
-    viewMenu->addAction("Zoom &Out", m_canvasView, &CanvasView::zoomOut, QKeySequence::ZoomOut);
-    viewMenu->addAction("&Actual Size", m_canvasView, &CanvasView::zoomActualSize, QKeySequence("Ctrl+0"));
+    QAction* zoomInAct = viewMenu->addAction("Zoom &In", m_canvasView, &CanvasView::zoomIn);
+    zoomInAct->setShortcuts({QKeySequence::ZoomIn, QKeySequence("Ctrl+=")});
+    QAction* zoomOutAct = viewMenu->addAction("Zoom &Out", m_canvasView, &CanvasView::zoomOut);
+    zoomOutAct->setShortcuts({QKeySequence::ZoomOut, QKeySequence("Ctrl+-")});
+    QAction* actualSizeAct = viewMenu->addAction("&Actual Size", m_canvasView, &CanvasView::zoomActualSize);
+    actualSizeAct->setShortcuts({QKeySequence("Ctrl+0"), QKeySequence("Ctrl+Alt+0")});
     viewMenu->addAction("Zoom to &Window", m_canvasView, &CanvasView::zoomToWindow, QKeySequence("Ctrl+B"));
     viewMenu->addSeparator();
     QAction* gridAct = viewMenu->addAction("&Grid", m_canvasView, &CanvasView::togglePixelGrid);
@@ -139,7 +154,8 @@ void MainWindow::setupMenus() {
     // --- Layers Menu ---
     QMenu* layersMenu = mb->addMenu("&Layers");
     layersMenu->addAction("&Add New Layer", this, &MainWindow::onAddLayer, QKeySequence("Ctrl+Shift+N"));
-    layersMenu->addAction("&Delete Layer", this, &MainWindow::onDeleteLayer);
+    QAction* delLayerAct = layersMenu->addAction("&Delete Layer", this, &MainWindow::onDeleteLayer);
+    delLayerAct->setShortcut(QKeySequence("Ctrl+Shift+Delete"));
     layersMenu->addAction("&Duplicate Layer", this, &MainWindow::onDuplicateLayer, QKeySequence("Ctrl+Shift+D"));
     layersMenu->addAction("&Merge Layer Down", this, &MainWindow::onMergeDown, QKeySequence("Ctrl+M"));
     layersMenu->addSeparator();
@@ -214,6 +230,10 @@ void MainWindow::setupDocks() {
         QAction* cAct = winMenu->addAction("&Colors", m_colorsDock, &QDockWidget::setVisible);
         cAct->setCheckable(true); cAct->setShortcut(QKeySequence("F8")); cAct->setChecked(true);
         connect(m_colorsDock, &QDockWidget::visibilityChanged, cAct, &QAction::setChecked);
+    }
+
+    for (QAction* act : findChildren<QAction*>()) {
+        act->setShortcutContext(Qt::ApplicationShortcut);
     }
 }
 
@@ -485,6 +505,69 @@ void MainWindow::onAbout() {
         "<li>Plugin-ready extensible architecture</li>"
         "</ul>"
         "</p>");
+}
+
+bool MainWindow::eventFilter(QObject* watched, QEvent* event) {
+    if (event->type() == QEvent::KeyPress) {
+        QKeyEvent* keyEvent = static_cast<QKeyEvent*>(event);
+
+        // 1. If focus is inside a text input widget or line edit, allow standard typing
+        QWidget* fw = QApplication::focusWidget();
+        auto isTextInput = [](QObject* obj) -> bool {
+            return obj && (qobject_cast<QLineEdit*>(obj) ||
+                           qobject_cast<QTextEdit*>(obj) ||
+                           qobject_cast<QPlainTextEdit*>(obj) ||
+                           qobject_cast<QSpinBox*>(obj) ||
+                           qobject_cast<QDoubleSpinBox*>(obj));
+        };
+
+        if (isTextInput(fw) || isTextInput(watched)) {
+            return QMainWindow::eventFilter(watched, event);
+        }
+
+        // 2. If TextTool is active on canvas and currently typing text, let it handle the typing
+        if (m_toolMgr && m_toolMgr->activeToolType() == ToolType::Text) {
+            auto textTool = std::dynamic_pointer_cast<TextTool>(m_toolMgr->activeTool());
+            if (textTool && textTool->isEditing()) {
+                return QMainWindow::eventFilter(watched, event);
+            }
+        }
+
+        // 3. If LineCurveTool is adjusting and user presses Enter or Escape, let LineCurveTool handle it
+        if (m_toolMgr && m_toolMgr->activeToolType() == ToolType::LineCurve) {
+            auto lineTool = std::dynamic_pointer_cast<LineCurveTool>(m_toolMgr->activeTool());
+            if (lineTool && lineTool->isEditing()) {
+                if (keyEvent->key() == Qt::Key_Return || keyEvent->key() == Qt::Key_Enter || keyEvent->key() == Qt::Key_Escape) {
+                    return QMainWindow::eventFilter(watched, event);
+                }
+            }
+        }
+
+        // 4. Try ToolManager global shortcuts (tool selection, cycling, X, D, [, ], arrows, Esc)
+        if (m_toolMgr && m_toolMgr->handleKeyPress(keyEvent)) {
+            if (m_canvasView) {
+                m_canvasView->update();
+            }
+            return true; // Event consumed globally!
+        }
+    }
+
+    return QMainWindow::eventFilter(watched, event);
+}
+
+void MainWindow::keyPressEvent(QKeyEvent* event) {
+    QWidget* fw = focusWidget();
+    if (fw && (qobject_cast<QLineEdit*>(fw) || qobject_cast<QTextEdit*>(fw) || qobject_cast<QSpinBox*>(fw))) {
+        QMainWindow::keyPressEvent(event);
+        return;
+    }
+
+    if (m_toolMgr && m_toolMgr->handleKeyPress(event)) {
+        event->accept();
+        return;
+    }
+
+    QMainWindow::keyPressEvent(event);
 }
 
 } // namespace pdn

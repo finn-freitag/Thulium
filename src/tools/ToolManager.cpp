@@ -6,6 +6,8 @@
 #include "ShapeTools.h"
 #include "TextTool.h"
 #include "ViewTools.h"
+#include "../core/Document.h"
+#include <QKeyEvent>
 
 namespace pdn {
 
@@ -67,6 +69,151 @@ void ToolManager::setActiveTool(ToolType type, Document* doc) {
         }
         emit activeToolChanged(m_activeToolType);
     }
+}
+
+void ToolManager::cycleSelectionTool(bool reverse) {
+    static const ToolType selTools[] = {
+        ToolType::RectangleSelect,
+        ToolType::LassoSelect,
+        ToolType::EllipseSelect,
+        ToolType::MagicWand
+    };
+    int count = 4;
+    int curIdx = -1;
+    for (int i = 0; i < count; ++i) {
+        if (m_activeToolType == selTools[i]) {
+            curIdx = i;
+            break;
+        }
+    }
+
+    if (curIdx == -1) {
+        setActiveTool(ToolType::RectangleSelect);
+    } else {
+        int nextIdx = reverse ? (curIdx - 1 + count) % count : (curIdx + 1) % count;
+        setActiveTool(selTools[nextIdx]);
+    }
+}
+
+void ToolManager::cycleMoveTool() {
+    if (m_activeToolType == ToolType::MoveSelectedPixels) {
+        setActiveTool(ToolType::MoveSelection);
+    } else {
+        setActiveTool(ToolType::MoveSelectedPixels);
+    }
+}
+
+bool ToolManager::handleKeyPress(QKeyEvent* event) {
+    if (!event) return false;
+
+    // Do not handle if Ctrl, Alt, or Meta is held (reserved for menu/app shortcuts)
+    if (event->modifiers() & (Qt::ControlModifier | Qt::AltModifier | Qt::MetaModifier)) {
+        return false;
+    }
+
+    // If TextTool is active and currently editing text, do not steal keys
+    if (m_activeToolType == ToolType::Text) {
+        auto textTool = std::dynamic_pointer_cast<TextTool>(activeTool());
+        if (textTool && textTool->isEditing()) {
+            return false;
+        }
+    }
+
+    int key = event->key();
+
+    // Color swap: X
+    if (key == Qt::Key_X) {
+        std::swap(m_context.primaryColor, m_context.secondaryColor);
+        m_context.notifyChanged();
+        return true;
+    }
+
+    // Default colors (B/W): D (only without Shift/Ctrl/Alt)
+    if (key == Qt::Key_D && event->modifiers() == Qt::NoModifier) {
+        m_context.primaryColor = Qt::black;
+        m_context.secondaryColor = Qt::white;
+        m_context.notifyChanged();
+        return true;
+    }
+
+    // Brush width decrease: [
+    if (key == Qt::Key_BracketLeft) {
+        m_context.brushWidth = std::max(1, m_context.brushWidth - 1);
+        m_context.notifyChanged();
+        return true;
+    }
+
+    // Brush width increase: ]
+    if (key == Qt::Key_BracketRight) {
+        m_context.brushWidth = std::min(500, m_context.brushWidth + 1);
+        m_context.notifyChanged();
+        return true;
+    }
+
+    // Selection tools cycle: S
+    if (key == Qt::Key_S) {
+        bool shift = (event->modifiers() & Qt::ShiftModifier);
+        cycleSelectionTool(shift);
+        return true;
+    }
+
+    // Move tools cycle: M
+    if (key == Qt::Key_M) {
+        cycleMoveTool();
+        return true;
+    }
+
+    // Individual tools
+    switch (key) {
+        case Qt::Key_B: setActiveTool(ToolType::Paintbrush); return true;
+        case Qt::Key_P: setActiveTool(ToolType::Pencil); return true;
+        case Qt::Key_E: setActiveTool(ToolType::Eraser); return true;
+        case Qt::Key_K: setActiveTool(ToolType::ColorPicker); return true;
+        case Qt::Key_L: setActiveTool(ToolType::CloneStamp); return true;
+        case Qt::Key_R: setActiveTool(ToolType::Recolor); return true;
+        case Qt::Key_F: setActiveTool(ToolType::PaintBucket); return true;
+        case Qt::Key_G: setActiveTool(ToolType::Gradient); return true;
+        case Qt::Key_T: setActiveTool(ToolType::Text); return true;
+        case Qt::Key_V: setActiveTool(ToolType::LineCurve); return true;
+        case Qt::Key_O: setActiveTool(ToolType::Shapes); return true;
+        case Qt::Key_Z: setActiveTool(ToolType::Zoom); return true;
+        case Qt::Key_H: setActiveTool(ToolType::Pan); return true;
+        default: break;
+    }
+
+    // Nudging with arrow keys if selection is active
+    if (key == Qt::Key_Left || key == Qt::Key_Right || key == Qt::Key_Up || key == Qt::Key_Down) {
+        if (m_document && !m_document->selection().isEmpty()) {
+            int step = (event->modifiers() & Qt::ShiftModifier) ? 10 : 1;
+            qreal dx = 0, dy = 0;
+            if (key == Qt::Key_Left) dx = -step;
+            else if (key == Qt::Key_Right) dx = step;
+            else if (key == Qt::Key_Up) dy = -step;
+            else if (key == Qt::Key_Down) dy = step;
+
+            if (m_activeToolType == ToolType::MoveSelectedPixels) {
+                auto movePixTool = std::dynamic_pointer_cast<MoveSelectedPixelsTool>(activeTool());
+                if (movePixTool) {
+                    movePixTool->nudge(m_document, dx, dy);
+                    return true;
+                }
+            }
+            m_document->selection().translate(dx, dy);
+            emit m_document->selectionChanged();
+            emit m_document->documentChanged();
+            return true;
+        }
+    }
+
+    // Escape to deselect if selection is active
+    if (key == Qt::Key_Escape) {
+        if (m_document && !m_document->selection().isEmpty()) {
+            m_document->clearSelection();
+            return true;
+        }
+    }
+
+    return false;
 }
 
 } // namespace pdn

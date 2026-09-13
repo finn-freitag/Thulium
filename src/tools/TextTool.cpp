@@ -65,11 +65,13 @@ void TextTool::keyPress(QKeyEvent* event, Document* doc, ToolContext& ctx) {
         m_active = false;
         m_text.clear();
         emit doc->documentChanged();
+        event->accept();
         return;
     }
 
     if (event->key() == Qt::Key_Return || event->key() == Qt::Key_Enter) {
         commit(doc, ctx);
+        event->accept();
         return;
     }
 
@@ -78,6 +80,7 @@ void TextTool::keyPress(QKeyEvent* event, Document* doc, ToolContext& ctx) {
             m_text.chop(1);
             emit doc->documentChanged();
         }
+        event->accept();
         return;
     }
 
@@ -85,6 +88,7 @@ void TextTool::keyPress(QKeyEvent* event, Document* doc, ToolContext& ctx) {
     if (!txt.isEmpty() && txt.at(0).isPrint()) {
         m_text += txt;
         emit doc->documentChanged();
+        event->accept();
     }
 }
 

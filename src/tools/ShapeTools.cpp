@@ -277,6 +277,7 @@ void LineCurveTool::keyPress(QKeyEvent* event, Document* doc, ToolContext& ctx) 
 
     if (event->key() == Qt::Key_Return || event->key() == Qt::Key_Enter) {
         commit(doc, ctx);
+        event->accept();
         return;
     }
 
@@ -284,6 +285,7 @@ void LineCurveTool::keyPress(QKeyEvent* event, Document* doc, ToolContext& ctx) 
         m_state = Idle;
         m_draggedHandle = -1;
         emit doc->documentChanged();
+        event->accept();
         return;
     }
 }

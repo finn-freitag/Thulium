@@ -237,6 +237,7 @@ void CanvasView::paintEvent(QPaintEvent* /*event*/) {
 }
 
 void CanvasView::mousePressEvent(QMouseEvent* event) {
+    setFocus();
     if (event->button() == Qt::MiddleButton || (event->modifiers() & Qt::AltModifier)) {
         m_spacePanning = true;
         m_lastMousePos = event->pos();
@@ -316,8 +317,18 @@ void CanvasView::keyPressEvent(QKeyEvent* event) {
     auto tool = m_toolMgr->activeTool();
     if (tool) {
         tool->keyPress(event, m_doc.get(), m_toolMgr->context());
-        update();
+        if (event->isAccepted()) {
+            update();
+            return;
+        }
     }
+
+    if (m_toolMgr && m_toolMgr->handleKeyPress(event)) {
+        event->accept();
+        update();
+        return;
+    }
+
     QWidget::keyPressEvent(event);
 }
 

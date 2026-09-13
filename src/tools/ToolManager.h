@@ -25,6 +25,10 @@ public:
 
     void setActiveTool(ToolType type, Document* doc = nullptr);
 
+    bool handleKeyPress(QKeyEvent* event);
+    void cycleSelectionTool(bool reverse = false);
+    void cycleMoveTool();
+
     ToolContext& context() { return m_context; }
     const ToolContext& context() const { return m_context; }
 

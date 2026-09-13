@@ -15,6 +15,8 @@ public:
     QString shortcut() const override { return "T"; }
     QCursor cursor() const override { return Qt::IBeamCursor; }
 
+    bool isEditing() const { return m_active; }
+
     void activate(Document* doc, ToolContext& ctx) override;
     void deactivate(Document* doc, ToolContext& ctx) override;
 

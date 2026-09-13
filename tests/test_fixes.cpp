@@ -12,6 +12,7 @@
 #include "../src/tools/ShapeTools.h"
 #include "../src/ui/ColorsDock.h"
 #include "../src/ui/CanvasView.h"
+#include "../src/ui/MainWindow.h"
 
 int main(int argc, char* argv[]) {
     int fakeArgc = 1;
@@ -340,6 +341,194 @@ int main(int argc, char* argv[]) {
         assert(donutPath.elementCount() == 10);
 
         std::cout << "  Passed: Magic Wand creates outline-only paths (no internal scanlines) and preserves hole boundaries!" << std::endl;
+    }
+
+    // Test 9: Keyboard Shortcuts and Keybindings
+    {
+        std::cout << "Test 9: Keybindings and tool shortcut handling..." << std::endl;
+        auto doc = std::make_shared<pdn::Document>(200, 200);
+        pdn::ToolManager toolMgr;
+        toolMgr.setDocument(doc.get());
+
+        // 1. Line/Curve tool shortcut is V, not O (which is Shapes)
+        auto lineTool = toolMgr.tool(pdn::ToolType::LineCurve);
+        auto shapesTool = toolMgr.tool(pdn::ToolType::Shapes);
+        assert(lineTool->shortcut() == "V");
+        assert(shapesTool->shortcut() == "O");
+        assert(lineTool->toolTip().contains("(V)"));
+        assert(shapesTool->toolTip().contains("(O)"));
+
+        // 2. Individual tool shortcuts
+        QKeyEvent keyB(QEvent::KeyPress, Qt::Key_B, Qt::NoModifier, "B");
+        toolMgr.handleKeyPress(&keyB);
+        assert(toolMgr.activeToolType() == pdn::ToolType::Paintbrush);
+
+        QKeyEvent keyP(QEvent::KeyPress, Qt::Key_P, Qt::NoModifier, "P");
+        toolMgr.handleKeyPress(&keyP);
+        assert(toolMgr.activeToolType() == pdn::ToolType::Pencil);
+
+        QKeyEvent keyE(QEvent::KeyPress, Qt::Key_E, Qt::NoModifier, "E");
+        toolMgr.handleKeyPress(&keyE);
+        assert(toolMgr.activeToolType() == pdn::ToolType::Eraser);
+
+        QKeyEvent keyK(QEvent::KeyPress, Qt::Key_K, Qt::NoModifier, "K");
+        toolMgr.handleKeyPress(&keyK);
+        assert(toolMgr.activeToolType() == pdn::ToolType::ColorPicker);
+
+        QKeyEvent keyV(QEvent::KeyPress, Qt::Key_V, Qt::NoModifier, "V");
+        toolMgr.handleKeyPress(&keyV);
+        assert(toolMgr.activeToolType() == pdn::ToolType::LineCurve);
+
+        QKeyEvent keyO(QEvent::KeyPress, Qt::Key_O, Qt::NoModifier, "O");
+        toolMgr.handleKeyPress(&keyO);
+        assert(toolMgr.activeToolType() == pdn::ToolType::Shapes);
+
+        QKeyEvent keyF(QEvent::KeyPress, Qt::Key_F, Qt::NoModifier, "F");
+        toolMgr.handleKeyPress(&keyF);
+        assert(toolMgr.activeToolType() == pdn::ToolType::PaintBucket);
+
+        QKeyEvent keyG(QEvent::KeyPress, Qt::Key_G, Qt::NoModifier, "G");
+        toolMgr.handleKeyPress(&keyG);
+        assert(toolMgr.activeToolType() == pdn::ToolType::Gradient);
+
+        QKeyEvent keyZ(QEvent::KeyPress, Qt::Key_Z, Qt::NoModifier, "Z");
+        toolMgr.handleKeyPress(&keyZ);
+        assert(toolMgr.activeToolType() == pdn::ToolType::Zoom);
+
+        QKeyEvent keyH(QEvent::KeyPress, Qt::Key_H, Qt::NoModifier, "H");
+        toolMgr.handleKeyPress(&keyH);
+        assert(toolMgr.activeToolType() == pdn::ToolType::Pan);
+
+        // 3. Selection tools cycling with S and Shift+S
+        QKeyEvent keyS(QEvent::KeyPress, Qt::Key_S, Qt::NoModifier, "S");
+        toolMgr.handleKeyPress(&keyS);
+        assert(toolMgr.activeToolType() == pdn::ToolType::RectangleSelect);
+
+        toolMgr.handleKeyPress(&keyS);
+        assert(toolMgr.activeToolType() == pdn::ToolType::LassoSelect);
+
+        toolMgr.handleKeyPress(&keyS);
+        assert(toolMgr.activeToolType() == pdn::ToolType::EllipseSelect);
+
+        toolMgr.handleKeyPress(&keyS);
+        assert(toolMgr.activeToolType() == pdn::ToolType::MagicWand);
+
+        toolMgr.handleKeyPress(&keyS);
+        assert(toolMgr.activeToolType() == pdn::ToolType::RectangleSelect);
+
+        QKeyEvent keyShiftS(QEvent::KeyPress, Qt::Key_S, Qt::ShiftModifier, "S");
+        toolMgr.handleKeyPress(&keyShiftS);
+        assert(toolMgr.activeToolType() == pdn::ToolType::MagicWand);
+
+        // 4. Move tools cycling with M
+        QKeyEvent keyM(QEvent::KeyPress, Qt::Key_M, Qt::NoModifier, "M");
+        toolMgr.handleKeyPress(&keyM);
+        assert(toolMgr.activeToolType() == pdn::ToolType::MoveSelectedPixels);
+
+        toolMgr.handleKeyPress(&keyM);
+        assert(toolMgr.activeToolType() == pdn::ToolType::MoveSelection);
+
+        toolMgr.handleKeyPress(&keyM);
+        assert(toolMgr.activeToolType() == pdn::ToolType::MoveSelectedPixels);
+
+        // 5. Color swap (X) and Default (D)
+        toolMgr.context().primaryColor = Qt::red;
+        toolMgr.context().secondaryColor = Qt::blue;
+        QKeyEvent keyX(QEvent::KeyPress, Qt::Key_X, Qt::NoModifier, "X");
+        toolMgr.handleKeyPress(&keyX);
+        assert(toolMgr.context().primaryColor == Qt::blue);
+        assert(toolMgr.context().secondaryColor == Qt::red);
+
+        QKeyEvent keyD(QEvent::KeyPress, Qt::Key_D, Qt::NoModifier, "D");
+        toolMgr.handleKeyPress(&keyD);
+        assert(toolMgr.context().primaryColor == Qt::black);
+        assert(toolMgr.context().secondaryColor == Qt::white);
+
+        // 6. Brush width adjustment with [ and ]
+        toolMgr.context().brushWidth = 5;
+        QKeyEvent keyRightBracket(QEvent::KeyPress, Qt::Key_BracketRight, Qt::NoModifier, "]");
+        toolMgr.handleKeyPress(&keyRightBracket);
+        assert(toolMgr.context().brushWidth == 6);
+
+        QKeyEvent keyLeftBracket(QEvent::KeyPress, Qt::Key_BracketLeft, Qt::NoModifier, "[");
+        toolMgr.handleKeyPress(&keyLeftBracket);
+        assert(toolMgr.context().brushWidth == 5);
+
+        // 7. Arrow keys nudging active selection
+        doc->selection().addRect(QRectF(20, 20, 30, 30));
+        QKeyEvent keyRight(QEvent::KeyPress, Qt::Key_Right, Qt::NoModifier);
+        toolMgr.handleKeyPress(&keyRight);
+        QRectF r = doc->selection().boundingRect();
+        assert(r.x() == 21 && r.y() == 20);
+
+        QKeyEvent keyDownShift(QEvent::KeyPress, Qt::Key_Down, Qt::ShiftModifier);
+        toolMgr.handleKeyPress(&keyDownShift);
+        r = doc->selection().boundingRect();
+        assert(r.x() == 21 && r.y() == 30);
+
+        // 8. Escape key deselects
+        assert(!doc->selection().isEmpty());
+        QKeyEvent keyEsc(QEvent::KeyPress, Qt::Key_Escape, Qt::NoModifier);
+        toolMgr.handleKeyPress(&keyEsc);
+        assert(doc->selection().isEmpty());
+
+        // 9. Text tool typing isolation: 'B' while editing text does not switch to Brush
+        toolMgr.setActiveTool(pdn::ToolType::Text);
+        auto textTool = std::dynamic_pointer_cast<pdn::TextTool>(toolMgr.activeTool());
+        textTool->mousePress(nullptr, doc.get(), QPointF(50, 50), toolMgr.context());
+        assert(textTool->isEditing());
+
+        // Send key 'B' to canvas / text tool
+        textTool->keyPress(&keyB, doc.get(), toolMgr.context());
+        // HandleKeyPress should NOT steal 'B' while editing
+        bool handled = toolMgr.handleKeyPress(&keyB);
+        assert(!handled);
+        assert(toolMgr.activeToolType() == pdn::ToolType::Text);
+
+        std::cout << "  Passed: All keybindings, cycling, color swaps, brush sizes, nudging, and text isolation work perfectly!" << std::endl;
+    }
+
+    // Test 10: Global EventFilter across docks, buttons, and windows
+    {
+        std::cout << "Test 10: Window-wide keybinding dispatch via eventFilter..." << std::endl;
+        pdn::MainWindow win;
+        win.show();
+
+        // 1. Send key 'B' to a child button in a dock (e.g. ToolsDock or ColorsDock)
+        auto buttons = win.findChildren<QAbstractButton*>();
+        assert(!buttons.isEmpty());
+        QAbstractButton* testBtn = buttons.first();
+        testBtn->setFocus();
+
+        // Initially active tool is Paintbrush, let's switch to Pencil first
+        win.toolManager()->setActiveTool(pdn::ToolType::Pencil);
+        assert(win.toolManager()->activeToolType() == pdn::ToolType::Pencil);
+
+        // Send key 'B' while button has focus
+        QKeyEvent keyB(QEvent::KeyPress, Qt::Key_B, Qt::NoModifier, "B");
+        QApplication::sendEvent(testBtn, &keyB);
+
+        // Through eventFilter, 'B' was intercepted and switched tool to Paintbrush!
+        assert(win.toolManager()->activeToolType() == pdn::ToolType::Paintbrush);
+
+        // 2. Send key 'S' to cycle selection tools while focused on a child widget
+        QKeyEvent keyS(QEvent::KeyPress, Qt::Key_S, Qt::NoModifier, "S");
+        QApplication::sendEvent(testBtn, &keyS);
+        assert(win.toolManager()->activeToolType() == pdn::ToolType::RectangleSelect);
+
+        QApplication::sendEvent(testBtn, &keyS);
+        assert(win.toolManager()->activeToolType() == pdn::ToolType::LassoSelect);
+
+        // 3. Verify typing inside a QLineEdit does NOT trigger tool shortcuts
+        QLineEdit testEdit(&win);
+        testEdit.show();
+        testEdit.setFocus();
+
+        QApplication::sendEvent(&testEdit, &keyB);
+        // Tool remains LassoSelect because typing in line edit takes priority
+        assert(win.toolManager()->activeToolType() == pdn::ToolType::LassoSelect);
+
+        std::cout << "  Passed: eventFilter dispatches keybindings window-wide across all docks and child widgets!" << std::endl;
     }
 
     std::cout << "=== All Tests Passed Successfully! ===" << std::endl;

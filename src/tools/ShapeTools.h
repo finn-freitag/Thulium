@@ -33,9 +33,11 @@ class LineCurveTool : public ITool {
 public:
     ToolType type() const override { return ToolType::LineCurve; }
     QString name() const override { return "Line / Curve"; }
-    QString toolTip() const override { return "Line / Curve (O)"; }
-    QString shortcut() const override { return "O"; }
+    QString toolTip() const override { return "Line / Curve (V)"; }
+    QString shortcut() const override { return "V"; }
     QCursor cursor() const override { return Qt::CrossCursor; }
+
+    bool isEditing() const { return m_state != Idle; }
 
     void activate(Document* doc, ToolContext& ctx) override;
     void deactivate(Document* doc, ToolContext& ctx) override;

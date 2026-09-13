@@ -115,6 +115,25 @@ void MoveSelectedPixelsTool::mouseRelease(QMouseEvent* /*event*/, Document* /*do
     m_moving = false;
 }
 
+void MoveSelectedPixelsTool::nudge(Document* doc, qreal dx, qreal dy) {
+    if (!m_hasFloating) {
+        liftPixels(doc);
+    }
+    m_floatingOffset += QPointF(dx, dy);
+    doc->selection().translate(dx, dy);
+    emit doc->selectionChanged();
+    emit doc->documentChanged();
+}
+
+void MoveSelectedPixelsTool::keyPress(QKeyEvent* event, Document* doc, ToolContext& /*ctx*/) {
+    if (event->key() == Qt::Key_Return || event->key() == Qt::Key_Enter) {
+        if (m_hasFloating) {
+            commit(doc);
+            event->accept();
+        }
+    }
+}
+
 void MoveSelectedPixelsTool::drawOverlay(QPainter& painter, const RenderOptions& opts) {
     if (!m_hasFloating || m_floatingImage.isNull()) return;
 

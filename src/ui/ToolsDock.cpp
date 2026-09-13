@@ -57,6 +57,7 @@ void ToolsDock::setupUI() {
         if (!toolObj) continue;
 
         QToolButton* btn = new QToolButton(container);
+        btn->setFocusPolicy(Qt::NoFocus);
         btn->setText(item.iconText.trimmed());
         btn->setToolTip(QString("%1 (%2)").arg(toolObj->name()).arg(toolObj->shortcut()));
         btn->setCheckable(true);

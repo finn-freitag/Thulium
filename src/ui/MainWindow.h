@@ -24,6 +24,8 @@ public:
     bool openFile(const QString& filePath);
     void newDocument(int width, int height);
 
+    ToolManager* toolManager() const { return m_toolMgr; }
+
 private slots:
     // File
     void onNew();
@@ -70,6 +72,10 @@ private slots:
 
     // Help
     void onAbout();
+
+protected:
+    bool eventFilter(QObject* watched, QEvent* event) override;
+    void keyPressEvent(QKeyEvent* event) override;
 
 private:
     void setupMenus();

@@ -36,9 +36,11 @@ public:
     void mousePress(QMouseEvent* event, Document* doc, const QPointF& docPos, ToolContext& ctx) override;
     void mouseMove(QMouseEvent* event, Document* doc, const QPointF& docPos, ToolContext& ctx) override;
     void mouseRelease(QMouseEvent* event, Document* doc, const QPointF& docPos, ToolContext& ctx) override;
+    void keyPress(QKeyEvent* event, Document* doc, ToolContext& ctx) override;
     void drawOverlay(QPainter& painter, const RenderOptions& opts) override;
 
     void commit(Document* doc);
+    void nudge(Document* doc, qreal dx, qreal dy);
 
 private:
     void liftPixels(Document* doc);
