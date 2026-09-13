@@ -4,9 +4,11 @@
 #include <QMouseEvent>
 #include <QKeyEvent>
 #include <QWheelEvent>
+#include <QClipboard>
 #include "../src/core/Document.h"
 #include "../src/tools/ToolManager.h"
 #include "../src/tools/SelectionTools.h"
+#include "../src/tools/MoveTools.h"
 #include "../src/tools/BrushTools.h"
 #include "../src/tools/TextTool.h"
 #include "../src/tools/ShapeTools.h"
@@ -573,6 +575,123 @@ int main(int argc, char* argv[]) {
         assert(win.toolManager()->activeToolType() == pdn::ToolType::LassoSelect);
 
         std::cout << "  Passed: eventFilter dispatches keybindings window-wide across all docks and child widgets!" << std::endl;
+    }
+
+    // Test 13: Copy/Cut/Paste behavior, selection persistence & floating selection movement
+    {
+        std::cout << "Test 13: Copy/Cut/Paste behavior and floating temporary layer..." << std::endl;
+        pdn::MainWindow win;
+        win.newDocument(200, 200);
+        auto doc = win.document();
+        assert(doc != nullptr);
+
+        auto layer = doc->activeLayer();
+        assert(layer != nullptr);
+        layer->fill(Qt::white);
+
+        // Draw a distinct green rect at (30, 40) size (50, 60)
+        for (int y = 40; y < 100; ++y) {
+            for (int x = 30; x < 80; ++x) {
+                layer->scanLine(y)[x] = 0xFF00FF00; // Green ARGB
+            }
+        }
+
+        // 1. Select the green rect
+        doc->selection().addRect(QRectF(30, 40, 50, 60), pdn::SelectionCombineMode::Replace);
+        assert(!doc->selection().isEmpty());
+
+        // 2. Test Cut: selection should disappear, content cut to clipboard, position & size saved
+        QMetaObject::invokeMethod(&win, "onCut");
+        assert(doc->selection().isEmpty()); // Requirement 1: selection disappears upon cut!
+        assert(layer->scanLine(50)[40] == 0x00000000); // Erased from active layer (transparent hole)
+        assert(pdn::MainWindow::hasLastCopied());
+        assert(pdn::MainWindow::lastCopiedPos() == QPoint(30, 40)); // Requirement 4: position saved!
+        assert(pdn::MainWindow::lastCopiedSize() == QSize(50, 60)); // Requirement 4: size saved!
+
+        // 3. Test Paste: same size, should paste at exact saved position (30, 40)
+        // and have selection around the pasted content
+        QMetaObject::invokeMethod(&win, "onPaste");
+        assert(!doc->selection().isEmpty()); // Requirement 2: selection around pasted content!
+        assert(doc->selection().boundingRect() == QRectF(30, 40, 50, 60));
+        assert(doc->hasFloatingSelection());
+        assert(doc->floatingOffset() == QPointF(30, 40));
+
+        // 4. Test Hidden Temporary Layer & Move pasted content without leaving a hole where pasted
+        // Fill layer with blue underneath floating selection
+        layer->fill(Qt::blue);
+        assert(layer->scanLine(50)[40] == 0xFF0000FF); // Layer underneath is blue!
+
+        // Move the floating selection by delta (70, 60) to (100, 100)
+        doc->moveFloatingSelection(QPointF(70, 60));
+        assert(doc->floatingOffset() == QPointF(100, 100));
+        assert(doc->selection().boundingRect() == QRectF(100, 100, 50, 60));
+
+        // CRITICAL CHECK: Where it originally was pasted (30, 40), there is NO HOLE in the layer!
+        assert(layer->scanLine(50)[40] == 0xFF0000FF); // No hole where it originally was pasted!
+        assert(layer->scanLine(110)[110] == 0xFF0000FF); // Not baked into layer yet!
+
+        // Composite image has green at (100, 100) and blue at (30, 40)
+        QImage comp = doc->composite();
+        assert(comp.pixelColor(40, 50) == QColor(Qt::blue));
+        assert(comp.pixelColor(110, 110) == QColor(Qt::green));
+
+        // 5. Test Deselect: bakes into real layer
+        QMetaObject::invokeMethod(&win, "onDeselect");
+        assert(!doc->hasFloatingSelection());
+        assert(doc->selection().isEmpty());
+        assert(layer->scanLine(110)[110] == 0xFF00FF00); // Now baked as green at (100, 100)!
+        assert(layer->scanLine(50)[40] == 0xFF0000FF); // Still blue at original paste location!
+
+        // 6. Test Normal selected content movement without paste:
+        // Select the newly baked green rect at (100, 100, 50, 60)
+        doc->selection().addRect(QRectF(100, 100, 50, 60), pdn::SelectionCombineMode::Replace);
+        win.toolManager()->setActiveTool(pdn::ToolType::MoveSelectedPixels);
+        auto moveTool = std::dynamic_pointer_cast<pdn::MoveSelectedPixelsTool>(win.toolManager()->activeTool());
+        assert(moveTool != nullptr);
+
+        // Move with MoveSelectedPixelsTool: mousePress lifts pixels
+        QMouseEvent press(QEvent::MouseButtonPress, QPointF(110, 110), Qt::LeftButton, Qt::LeftButton, Qt::NoModifier);
+        moveTool->mousePress(&press, doc.get(), QPointF(110, 110), win.toolManager()->context());
+        assert(doc->hasFloatingSelection());
+        assert(layer->scanLine(110)[110] == 0x00000000); // Lifted! Transparent hole at original location
+
+        // Move to (130, 120)
+        QMouseEvent move1(QEvent::MouseMove, QPointF(130, 120), Qt::LeftButton, Qt::LeftButton, Qt::NoModifier);
+        moveTool->mouseMove(&move1, doc.get(), QPointF(130, 120), win.toolManager()->context());
+        QMouseEvent release1(QEvent::MouseButtonRelease, QPointF(130, 120), Qt::LeftButton, Qt::NoButton, Qt::NoModifier);
+        moveTool->mouseRelease(&release1, doc.get(), QPointF(130, 120), win.toolManager()->context());
+
+        // Move again to (140, 130) - ensure no hole at intermediate position (120, 110)
+        QMouseEvent press2(QEvent::MouseButtonPress, QPointF(130, 120), Qt::LeftButton, Qt::LeftButton, Qt::NoModifier);
+        moveTool->mousePress(&press2, doc.get(), QPointF(130, 120), win.toolManager()->context());
+        QMouseEvent move2(QEvent::MouseMove, QPointF(140, 130), Qt::LeftButton, Qt::LeftButton, Qt::NoModifier);
+        moveTool->mouseMove(&move2, doc.get(), QPointF(140, 130), win.toolManager()->context());
+
+        // Deselect bakes into layer
+        QMetaObject::invokeMethod(&win, "onDeselect");
+        assert(!doc->hasFloatingSelection());
+        assert(doc->selection().isEmpty());
+        // Baked at final position: offset was (100, 100) + (30, 20) = (130, 120)
+        assert(layer->scanLine(130)[140] == 0xFF00FF00); // Baked at final position!
+        assert(layer->scanLine(110)[110] == 0x00000000); // Hole remains only at original lifted position!
+
+        // 7. Test Paste with different image size: defaults to (0, 0)
+        QImage diffImg(25, 25, QImage::Format_ARGB32);
+        diffImg.fill(Qt::red);
+        QClipboard* clip = QGuiApplication::clipboard();
+        clip->setImage(diffImg);
+
+        QMetaObject::invokeMethod(&win, "onPaste");
+        assert(doc->hasFloatingSelection());
+        assert(doc->floatingOffset() == QPointF(0, 0)); // Not matching size -> pastes at (0, 0)!
+        assert(doc->selection().boundingRect() == QRectF(0, 0, 25, 25)); // Selection around pasted image!
+
+        // Deselect bakes it
+        QMetaObject::invokeMethod(&win, "onDeselect");
+        assert(!doc->hasFloatingSelection());
+        assert(layer->scanLine(5)[5] == 0xFFFF0000); // Red baked at (0, 0)
+
+        std::cout << "  Passed: Copy/Cut/Paste, position persistence, selection bounds, and floating temporary layer all work properly!" << std::endl;
     }
 
     std::cout << "=== All Tests Passed Successfully! ===" << std::endl;

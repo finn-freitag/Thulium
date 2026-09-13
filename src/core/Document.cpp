@@ -1,4 +1,5 @@
 #include "Document.h"
+#include "History.h"
 #include <QFileInfo>
 #include <QPainter>
 #include <algorithm>
@@ -52,6 +53,9 @@ std::shared_ptr<Layer> Document::activeLayer() const {
 
 void Document::setActiveLayerIndex(int index) {
     if (index >= 0 && index < m_layers.size() && index != m_activeLayerIndex) {
+        if (m_hasFloatingSelection) {
+            bakeFloatingSelection();
+        }
         m_activeLayerIndex = index;
         emit activeLayerChanged(m_activeLayerIndex);
     }
@@ -97,6 +101,9 @@ std::shared_ptr<Layer> Document::removeLayer(int index) {
     if (m_layers.size() <= 1 || index < 0 || index >= m_layers.size()) {
         return nullptr; // Cannot remove last layer
     }
+    if (m_hasFloatingSelection) {
+        bakeFloatingSelection();
+    }
     auto removed = m_layers.takeAt(index);
     if (m_activeLayerIndex >= m_layers.size()) {
         m_activeLayerIndex = m_layers.size() - 1;
@@ -108,6 +115,9 @@ std::shared_ptr<Layer> Document::removeLayer(int index) {
 }
 
 std::shared_ptr<Layer> Document::duplicateLayer(int index) {
+    if (m_hasFloatingSelection) {
+        bakeFloatingSelection();
+    }
     auto src = layer(index);
     if (!src) return nullptr;
     auto dup = src->clone();
@@ -128,6 +138,9 @@ bool Document::moveLayer(int fromIndex, int toIndex) {
         fromIndex == toIndex) {
         return false;
     }
+    if (m_hasFloatingSelection) {
+        bakeFloatingSelection();
+    }
     m_layers.move(fromIndex, toIndex);
     m_activeLayerIndex = toIndex;
     emit layerCountChanged();
@@ -139,6 +152,9 @@ bool Document::moveLayer(int fromIndex, int toIndex) {
 bool Document::mergeLayerDown(int index) {
     if (index <= 0 || index >= m_layers.size()) {
         return false; // Can't merge down bottom layer
+    }
+    if (m_hasFloatingSelection) {
+        bakeFloatingSelection();
     }
     auto topLayer = m_layers.at(index);
     auto bottomLayer = m_layers.at(index - 1);
@@ -157,7 +173,120 @@ bool Document::mergeLayerDown(int index) {
     return true;
 }
 
+void Document::createFloatingSelection(const QImage& image, const QPointF& offset, bool isLifted, const QString& actionName) {
+    if (m_hasFloatingSelection) {
+        bakeFloatingSelection();
+    }
+    auto layer = activeLayer();
+    if (!layer) return;
+
+    m_floatingImage = image.copy();
+    m_floatingOffset = offset;
+    m_floatingLayerIndex = m_activeLayerIndex;
+    m_floatingSnapshot = layer->image().copy();
+    m_floatingIsLifted = isLifted;
+    m_floatingActionName = actionName;
+    m_hasFloatingSelection = true;
+    emit documentChanged();
+}
+
+void Document::liftSelectionToFloating() {
+    if (m_hasFloatingSelection || m_selection.isEmpty()) return;
+    auto layer = activeLayer();
+    if (!layer) return;
+
+    m_floatingSnapshot = layer->image().copy();
+    m_floatingLayerIndex = m_activeLayerIndex;
+    m_floatingIsLifted = true;
+    m_floatingActionName = "Move Pixels";
+
+    QRectF bounds = m_selection.boundingRect();
+    QRect srcRect = bounds.toAlignedRect().intersected(QRect(0, 0, m_width, m_height));
+    if (srcRect.isEmpty()) return;
+
+    m_floatingImage = QImage(srcRect.size(), QImage::Format_ARGB32);
+    m_floatingImage.fill(Qt::transparent);
+
+    // Copy selected pixels to floating image
+    QPainter pFloat(&m_floatingImage);
+    pFloat.drawImage(-srcRect.x(), -srcRect.y(), layer->image());
+    pFloat.end();
+
+    // Mask floating image with selection
+    QPainter pMask(&m_floatingImage);
+    pMask.setCompositionMode(QPainter::CompositionMode_DestinationIn);
+    pMask.translate(-srcRect.x(), -srcRect.y());
+    pMask.fillPath(m_selection.path(), Qt::black);
+    pMask.end();
+
+    // Clear the selected area on the layer
+    QPainter pLayer(&layer->image());
+    pLayer.setCompositionMode(QPainter::CompositionMode_Clear);
+    pLayer.fillPath(m_selection.path(), Qt::transparent);
+    pLayer.end();
+
+    m_floatingOffset = srcRect.topLeft();
+    m_hasFloatingSelection = true;
+
+    emit documentChanged();
+}
+
+void Document::moveFloatingSelection(const QPointF& delta) {
+    if (!m_hasFloatingSelection) return;
+    m_floatingOffset += delta;
+    m_selection.translate(delta.x(), delta.y());
+    emit selectionChanged();
+    emit documentChanged();
+}
+
+void Document::bakeFloatingSelection() {
+    if (!m_hasFloatingSelection) return;
+    auto layer = this->layer(m_floatingLayerIndex);
+    if (layer) {
+        QPainter p(&layer->image());
+        p.drawImage(m_floatingOffset, m_floatingImage);
+        p.end();
+
+        QString act = m_floatingActionName.isEmpty() ? (m_floatingIsLifted ? "Move Pixels" : "Paste") : m_floatingActionName;
+        m_undoStack.push(new LayerBitmapUndoCommand(this, m_floatingLayerIndex, m_floatingSnapshot, act));
+    }
+
+    m_hasFloatingSelection = false;
+    m_floatingImage = QImage();
+    m_floatingIsLifted = false;
+    emit documentChanged();
+}
+
+void Document::cancelFloatingSelection() {
+    if (!m_hasFloatingSelection) return;
+    auto layer = this->layer(m_floatingLayerIndex);
+    if (layer && m_floatingIsLifted) {
+        layer->setImage(m_floatingSnapshot.copy());
+    }
+    m_hasFloatingSelection = false;
+    m_floatingImage = QImage();
+    m_floatingIsLifted = false;
+    m_selection.clear();
+    emit selectionChanged();
+    emit documentChanged();
+}
+
+void Document::discardFloatingSelection() {
+    if (!m_hasFloatingSelection) return;
+    if (m_floatingIsLifted) {
+        QString act = m_floatingActionName.isEmpty() ? "Cut" : m_floatingActionName;
+        m_undoStack.push(new LayerBitmapUndoCommand(this, m_floatingLayerIndex, m_floatingSnapshot, act));
+    }
+    m_hasFloatingSelection = false;
+    m_floatingImage = QImage();
+    m_floatingIsLifted = false;
+    emit documentChanged();
+}
+
 void Document::clearSelection() {
+    if (m_hasFloatingSelection) {
+        bakeFloatingSelection();
+    }
     m_selection.clear();
     emit selectionChanged();
     emit documentChanged();
@@ -165,6 +294,9 @@ void Document::clearSelection() {
 
 void Document::resizeCanvas(int newWidth, int newHeight, Qt::Alignment anchor) {
     if (newWidth <= 0 || newHeight <= 0) return;
+    if (m_hasFloatingSelection) {
+        bakeFloatingSelection();
+    }
     int dx = 0;
     int dy = 0;
 
@@ -197,6 +329,9 @@ void Document::resizeCanvas(int newWidth, int newHeight, Qt::Alignment anchor) {
 
 void Document::resizeImage(int newWidth, int newHeight, Qt::TransformationMode mode) {
     if (newWidth <= 0 || newHeight <= 0) return;
+    if (m_hasFloatingSelection) {
+        bakeFloatingSelection();
+    }
     for (auto& l : m_layers) {
         l->setImage(l->image().scaled(newWidth, newHeight, Qt::IgnoreAspectRatio, mode));
     }
@@ -207,6 +342,9 @@ void Document::resizeImage(int newWidth, int newHeight, Qt::TransformationMode m
 }
 
 void Document::crop(const QRect& rect) {
+    if (m_hasFloatingSelection) {
+        bakeFloatingSelection();
+    }
     QRect validRect = rect.intersected(QRect(0, 0, m_width, m_height));
     if (validRect.isEmpty()) return;
 
@@ -220,16 +358,25 @@ void Document::crop(const QRect& rect) {
 }
 
 void Document::flipHorizontal() {
+    if (m_hasFloatingSelection) {
+        bakeFloatingSelection();
+    }
     for (auto& l : m_layers) l->flipHorizontal();
     emit documentChanged();
 }
 
 void Document::flipVertical() {
+    if (m_hasFloatingSelection) {
+        bakeFloatingSelection();
+    }
     for (auto& l : m_layers) l->flipVertical();
     emit documentChanged();
 }
 
 void Document::rotate90CW() {
+    if (m_hasFloatingSelection) {
+        bakeFloatingSelection();
+    }
     for (auto& l : m_layers) l->rotate90CW();
     std::swap(m_width, m_height);
     m_selection.clear();
@@ -237,6 +384,9 @@ void Document::rotate90CW() {
 }
 
 void Document::rotate90CCW() {
+    if (m_hasFloatingSelection) {
+        bakeFloatingSelection();
+    }
     for (auto& l : m_layers) l->rotate90CCW();
     std::swap(m_width, m_height);
     m_selection.clear();
@@ -244,12 +394,18 @@ void Document::rotate90CCW() {
 }
 
 void Document::rotate180() {
+    if (m_hasFloatingSelection) {
+        bakeFloatingSelection();
+    }
     for (auto& l : m_layers) l->rotate180();
     emit documentChanged();
 }
 
 void Document::flatten() {
-    if (m_layers.size() <= 1) return;
+    if (m_layers.size() <= 1 && !m_hasFloatingSelection) return;
+    if (m_hasFloatingSelection) {
+        bakeFloatingSelection();
+    }
     QImage compositeImage = composite();
     m_layers.clear();
     auto flat = std::make_shared<Layer>(compositeImage, "Background", true);
@@ -276,9 +432,19 @@ void Document::compositeInto(QImage& target) const {
     int pixelCount = m_width * m_height;
     uint32_t* targetBits = reinterpret_cast<uint32_t*>(target.bits());
 
-    for (const auto& layer : m_layers) {
+    for (int i = 0; i < m_layers.size(); ++i) {
+        const auto& layer = m_layers.at(i);
         if (!layer->isVisible()) continue;
         blendImages(targetBits, layer->bits(), pixelCount, layer->blendMode(), layer->opacity());
+
+        // Composite floating selection directly above active layer
+        if (i == m_activeLayerIndex && m_hasFloatingSelection && !m_floatingImage.isNull()) {
+            QPainter p(&target);
+            p.setOpacity(layer->opacity() / 255.0);
+            p.drawImage(m_floatingOffset, m_floatingImage);
+            p.end();
+            targetBits = reinterpret_cast<uint32_t*>(target.bits());
+        }
     }
 }
 

@@ -23,6 +23,10 @@
 
 namespace pdn {
 
+QPoint MainWindow::s_lastCopiedPos = QPoint(0, 0);
+QSize MainWindow::s_lastCopiedSize = QSize(0, 0);
+bool MainWindow::s_hasLastCopied = false;
+
 MainWindow::MainWindow(QWidget* parent)
     : QMainWindow(parent),
       m_toolMgr(new ToolManager(this)),
@@ -105,7 +109,15 @@ void MainWindow::setupMenus() {
 
     // --- Edit Menu ---
     QMenu* editMenu = mb->addMenu("&Edit");
-    QAction* undoAct = editMenu->addAction("&Undo", this, [this]() { if (m_doc) m_doc->undoStack()->undo(); }, QKeySequence::Undo);
+    QAction* undoAct = editMenu->addAction("&Undo", this, [this]() {
+        if (m_doc) {
+            if (m_doc->hasFloatingSelection()) {
+                m_doc->cancelFloatingSelection();
+                return;
+            }
+            m_doc->undoStack()->undo();
+        }
+    }, QKeySequence::Undo);
     QAction* redoAct = editMenu->addAction("&Redo", this, [this]() { if (m_doc) m_doc->undoStack()->redo(); });
     redoAct->setShortcuts({QKeySequence("Ctrl+Y"), QKeySequence("Ctrl+Shift+Z")});
     editMenu->addSeparator();
@@ -303,12 +315,36 @@ void MainWindow::onClose() {
 }
 
 void MainWindow::onCut() {
+    if (!m_doc) return;
+
+    if (m_doc->hasFloatingSelection()) {
+        onCopy();
+        m_doc->discardFloatingSelection();
+        m_doc->clearSelection();
+        return;
+    }
+
     onCopy();
     onEraseSelection();
+    // Requirement 1: When I cut something, the selection should disappear.
+    m_doc->clearSelection();
 }
 
 void MainWindow::onCopy() {
     if (!m_doc) return;
+
+    if (m_doc->hasFloatingSelection()) {
+        QImage cropped = m_doc->floatingImage();
+        if (cropped.isNull()) return;
+        s_lastCopiedPos = m_doc->floatingOffset().toPoint();
+        s_lastCopiedSize = cropped.size();
+        s_hasLastCopied = true;
+
+        QClipboard* clipboard = QGuiApplication::clipboard();
+        clipboard->setImage(cropped);
+        return;
+    }
+
     auto layer = m_doc->activeLayer();
     if (!layer) return;
 
@@ -317,6 +353,8 @@ void MainWindow::onCopy() {
         bounds = QRectF(0, 0, m_doc->width(), m_doc->height());
     }
     QRect srcRect = bounds.toAlignedRect().intersected(QRect(0, 0, m_doc->width(), m_doc->height()));
+    if (srcRect.isEmpty()) return;
+
     QImage cropped = layer->image().copy(srcRect);
 
     if (!m_doc->selection().isEmpty()) {
@@ -326,6 +364,10 @@ void MainWindow::onCopy() {
         p.fillPath(m_doc->selection().path(), Qt::black);
         p.end();
     }
+
+    s_lastCopiedPos = srcRect.topLeft();
+    s_lastCopiedSize = cropped.size();
+    s_hasLastCopied = true;
 
     QClipboard* clipboard = QGuiApplication::clipboard();
     clipboard->setImage(cropped);
@@ -339,15 +381,32 @@ void MainWindow::onPaste() {
     QImage img = qvariant_cast<QImage>(clipboard->image());
     if (img.isNull()) return;
 
-    auto layer = m_doc->activeLayer();
-    if (!layer) return;
+    // Requirement 4: When something is cut or copied, the position and size should be saved.
+    // When the next paste contains an image, with the same size as the previous cut/copy,
+    // then it should be pasted at that exact position.
+    QPoint pastePos(0, 0);
+    if (s_hasLastCopied && img.size() == s_lastCopiedSize) {
+        pastePos = s_lastCopiedPos;
+    }
 
-    QImage oldImg = layer->image().copy();
-    QPainter p(&layer->image());
-    p.drawImage(0, 0, img);
-    p.end();
+    // Switch tool to MoveSelectedPixels first
+    if (m_toolMgr) {
+        m_toolMgr->setActiveTool(ToolType::MoveSelectedPixels);
+    }
 
-    m_doc->undoStack()->push(new LayerBitmapUndoCommand(m_doc.get(), m_doc->activeLayerIndex(), oldImg, "Paste"));
+    // Bake any existing floating selection before starting new paste
+    if (m_doc->hasFloatingSelection()) {
+        m_doc->bakeFloatingSelection();
+    }
+
+    // Requirement 3: Paste creates a hidden temporary layer (floating selection)
+    // with isLifted = false so the layer underneath is NOT punched with a hole!
+    m_doc->createFloatingSelection(img, pastePos, false, "Paste");
+
+    // Requirement 2: When I paste something, it should have a selection around the pasted content.
+    m_doc->selection().clear();
+    m_doc->selection().addRect(QRectF(pastePos, img.size()), SelectionCombineMode::Replace);
+    emit m_doc->selectionChanged();
     emit m_doc->documentChanged();
 }
 
@@ -359,17 +418,37 @@ void MainWindow::onPasteIntoNewLayer() {
     QImage img = qvariant_cast<QImage>(clipboard->image());
     if (img.isNull()) return;
 
+    if (m_doc->hasFloatingSelection()) {
+        m_doc->bakeFloatingSelection();
+    }
+
+    QPoint pastePos(0, 0);
+    if (s_hasLastCopied && img.size() == s_lastCopiedSize) {
+        pastePos = s_lastCopiedPos;
+    }
+
     auto newLayer = m_doc->addLayer("Pasted Layer");
     if (newLayer) {
         QPainter p(&newLayer->image());
-        p.drawImage(0, 0, img);
+        p.drawImage(pastePos, img);
         p.end();
+
+        m_doc->selection().clear();
+        m_doc->selection().addRect(QRectF(pastePos, img.size()), SelectionCombineMode::Replace);
+        emit m_doc->selectionChanged();
         emit m_doc->documentChanged();
     }
 }
 
 void MainWindow::onEraseSelection() {
     if (!m_doc) return;
+
+    if (m_doc->hasFloatingSelection()) {
+        m_doc->discardFloatingSelection();
+        m_doc->clearSelection();
+        return;
+    }
+
     auto layer = m_doc->activeLayer();
     if (!layer) return;
 

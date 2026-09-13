@@ -7,7 +7,10 @@
 namespace pdn {
 
 // --- RectangleSelectTool ---
-void RectangleSelectTool::mousePress(QMouseEvent* /*event*/, Document* /*doc*/, const QPointF& docPos, ToolContext& /*ctx*/) {
+void RectangleSelectTool::mousePress(QMouseEvent* /*event*/, Document* doc, const QPointF& docPos, ToolContext& /*ctx*/) {
+    if (doc && doc->hasFloatingSelection()) {
+        doc->bakeFloatingSelection();
+    }
     m_startPos = docPos;
     m_currentPos = docPos;
     m_selecting = true;
@@ -55,7 +58,10 @@ void RectangleSelectTool::drawOverlay(QPainter& painter, const RenderOptions& op
 }
 
 // --- EllipseSelectTool ---
-void EllipseSelectTool::mousePress(QMouseEvent* /*event*/, Document* /*doc*/, const QPointF& docPos, ToolContext& /*ctx*/) {
+void EllipseSelectTool::mousePress(QMouseEvent* /*event*/, Document* doc, const QPointF& docPos, ToolContext& /*ctx*/) {
+    if (doc && doc->hasFloatingSelection()) {
+        doc->bakeFloatingSelection();
+    }
     m_startPos = docPos;
     m_currentPos = docPos;
     m_selecting = true;
@@ -103,7 +109,10 @@ void EllipseSelectTool::drawOverlay(QPainter& painter, const RenderOptions& opts
 }
 
 // --- LassoSelectTool ---
-void LassoSelectTool::mousePress(QMouseEvent* /*event*/, Document* /*doc*/, const QPointF& docPos, ToolContext& /*ctx*/) {
+void LassoSelectTool::mousePress(QMouseEvent* /*event*/, Document* doc, const QPointF& docPos, ToolContext& /*ctx*/) {
+    if (doc && doc->hasFloatingSelection()) {
+        doc->bakeFloatingSelection();
+    }
     m_polygon.clear();
     m_polygon << docPos;
     m_selecting = true;
@@ -151,6 +160,9 @@ void LassoSelectTool::drawOverlay(QPainter& painter, const RenderOptions& opts) 
 
 // --- MagicWandTool ---
 void MagicWandTool::mousePress(QMouseEvent* /*event*/, Document* doc, const QPointF& docPos, ToolContext& ctx) {
+    if (doc && doc->hasFloatingSelection()) {
+        doc->bakeFloatingSelection();
+    }
     int x = static_cast<int>(docPos.x());
     int y = static_cast<int>(docPos.y());
     if (x < 0 || x >= doc->width() || y < 0 || y >= doc->height()) {

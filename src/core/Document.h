@@ -49,6 +49,19 @@ public:
     const Selection& selection() const { return m_selection; }
     void clearSelection();
 
+    // Floating selection (hidden temporary layer for paste & moving selected pixels)
+    bool hasFloatingSelection() const { return m_hasFloatingSelection; }
+    const QImage& floatingImage() const { return m_floatingImage; }
+    const QPointF& floatingOffset() const { return m_floatingOffset; }
+    bool isFloatingLifted() const { return m_floatingIsLifted; }
+
+    void createFloatingSelection(const QImage& image, const QPointF& offset, bool isLifted, const QString& actionName = "Paste");
+    void liftSelectionToFloating();
+    void moveFloatingSelection(const QPointF& delta);
+    void bakeFloatingSelection();
+    void cancelFloatingSelection();
+    void discardFloatingSelection();
+
     // Canvas / Image transformation
     void resizeCanvas(int newWidth, int newHeight, Qt::Alignment anchor = Qt::AlignCenter);
     void resizeImage(int newWidth, int newHeight, Qt::TransformationMode mode = Qt::SmoothTransformation);
@@ -80,6 +93,15 @@ private:
     int m_activeLayerIndex = 0;
     Selection m_selection;
     QUndoStack m_undoStack;
+
+    // Floating selection state
+    bool m_hasFloatingSelection = false;
+    QImage m_floatingImage;
+    QPointF m_floatingOffset;
+    QImage m_floatingSnapshot;
+    int m_floatingLayerIndex = 0;
+    bool m_floatingIsLifted = false;
+    QString m_floatingActionName;
 };
 
 } // namespace pdn

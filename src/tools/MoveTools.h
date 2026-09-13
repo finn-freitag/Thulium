@@ -43,14 +43,7 @@ public:
     void nudge(Document* doc, qreal dx, qreal dy);
 
 private:
-    void liftPixels(Document* doc);
-
     QPointF m_lastPos;
-    QPointF m_floatingOffset;
-    QImage m_floatingImage;
-    QRectF m_originalSelectionBounds;
-    QImage m_undoSnapshot;
-    bool m_hasFloating = false;
     bool m_moving = false;
 };
 

@@ -25,6 +25,11 @@ public:
     void newDocument(int width, int height);
 
     ToolManager* toolManager() const { return m_toolMgr; }
+    std::shared_ptr<Document> document() const { return m_doc; }
+
+    static QPoint lastCopiedPos() { return s_lastCopiedPos; }
+    static QSize lastCopiedSize() { return s_lastCopiedSize; }
+    static bool hasLastCopied() { return s_hasLastCopied; }
 
 private slots:
     // File
@@ -95,6 +100,10 @@ private:
     LayersDock* m_layersDock;
     ColorsDock* m_colorsDock;
     StatusWidget* m_statusWidget;
+
+    static QPoint s_lastCopiedPos;
+    static QSize s_lastCopiedSize;
+    static bool s_hasLastCopied;
 };
 
 } // namespace pdn
