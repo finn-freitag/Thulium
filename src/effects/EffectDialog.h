@@ -13,14 +13,17 @@
 #include <vector>
 #include "../core/Document.h"
 #include "../core/History.h"
+#include "ICanvasInteraction.h"
 
 namespace pdn {
 
-class EffectDialog : public QDialog {
+class EffectDialog : public QDialog, public ICanvasPointReceiver, public ICanvasOverlayProvider {
     Q_OBJECT
 public:
     EffectDialog(Document* doc, const QString& effectName, QWidget* parent = nullptr);
-    ~EffectDialog() override = default;
+    ~EffectDialog() override;
+
+    int exec() override;
 
     struct SliderControls {
         QSlider* slider = nullptr;
@@ -37,6 +40,22 @@ public:
     void addCustomWidget(QWidget* widget);
 
     void setupButtons();
+
+    // Canvas coordinate picking and interaction
+    void enablePointPicking(bool enable = true);
+    bool isPointPickingEnabled() const { return m_pointPickingEnabled; }
+
+    void setCanvasBridge(ICanvasInteractionBridge* bridge) { m_bridge = bridge; }
+    ICanvasInteractionBridge* canvasBridge() const { return m_bridge; }
+
+    static void setGlobalCanvasBridge(ICanvasInteractionBridge* bridge) { s_globalBridge = bridge; }
+    static ICanvasInteractionBridge* globalCanvasBridge() { return s_globalBridge; }
+
+    // ICanvasPointReceiver
+    void onCanvasPointPicked(const QPointF& /*docPos*/) override {}
+
+    // ICanvasOverlayProvider
+    void drawCanvasOverlay(QPainter& /*painter*/, const RenderOptions& /*opts*/) override {}
 
 protected:
     virtual void processPreview(QImage& image) = 0;
@@ -56,6 +75,11 @@ protected:
     std::vector<SliderControls> m_sliders;
     std::vector<std::pair<QCheckBox*, bool>> m_checkBoxes;
     bool m_buttonsAdded = false;
+
+    ICanvasInteractionBridge* m_bridge = nullptr;
+    bool m_pointPickingEnabled = false;
+
+    static ICanvasInteractionBridge* s_globalBridge;
 };
 
 // Helper to run an effect without showing a dialog

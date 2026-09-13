@@ -1,11 +1,21 @@
 #include "EffectDialog.h"
+#include <QEventLoop>
 
 namespace pdn {
+
+ICanvasInteractionBridge* EffectDialog::s_globalBridge = nullptr;
 
 EffectDialog::EffectDialog(Document* doc, const QString& effectName, QWidget* parent)
     : QDialog(parent), m_doc(doc), m_effectName(effectName) {
     setWindowTitle(effectName);
     setMinimumWidth(380);
+
+    // Keep dialog floating on top of the parent window without setting window modality
+    // so the window manager / compositor will NEVER darken/dim the MainWindow!
+    setWindowModality(Qt::NonModal);
+    setWindowFlag(Qt::WindowStaysOnTopHint, true);
+
+    m_bridge = s_globalBridge;
 
     m_layerIndex = m_doc ? m_doc->activeLayerIndex() : -1;
     if (m_doc && m_doc->activeLayer()) {
@@ -13,6 +23,65 @@ EffectDialog::EffectDialog(Document* doc, const QString& effectName, QWidget* pa
     }
 
     m_mainLayout = new QVBoxLayout(this);
+}
+
+EffectDialog::~EffectDialog() {
+    if (m_bridge && m_pointPickingEnabled) {
+        if (m_bridge->pointReceiver() == this) {
+            m_bridge->setPointReceiver(nullptr);
+        }
+        if (m_bridge->overlayProvider() == this) {
+            m_bridge->setOverlayProvider(nullptr);
+        }
+        m_bridge->requestCanvasRepaint();
+    }
+}
+
+int EffectDialog::exec() {
+    // Ensure non-modal to prevent compositor from darkening the MainWindow
+    setWindowModality(Qt::NonModal);
+    setWindowFlag(Qt::WindowStaysOnTopHint, true);
+
+    if (m_pointPickingEnabled && m_bridge) {
+        m_bridge->setPointReceiver(this);
+        m_bridge->setOverlayProvider(this);
+        m_bridge->requestCanvasRepaint();
+    }
+
+    show();
+    raise();
+    activateWindow();
+
+    // Local event loop maintains synchronous execution without modal dimming
+    QEventLoop loop;
+    connect(this, &QDialog::finished, &loop, &QEventLoop::quit);
+    loop.exec();
+
+    if (m_bridge) {
+        if (m_bridge->pointReceiver() == this) {
+            m_bridge->setPointReceiver(nullptr);
+        }
+        if (m_bridge->overlayProvider() == this) {
+            m_bridge->setOverlayProvider(nullptr);
+        }
+        m_bridge->requestCanvasRepaint();
+    }
+
+    return (result() == QDialog::Accepted) ? QDialog::Accepted : QDialog::Rejected;
+}
+
+void EffectDialog::enablePointPicking(bool enable) {
+    m_pointPickingEnabled = enable;
+    if (isVisible() && m_bridge) {
+        if (enable) {
+            m_bridge->setPointReceiver(this);
+            m_bridge->setOverlayProvider(this);
+        } else {
+            if (m_bridge->pointReceiver() == this) m_bridge->setPointReceiver(nullptr);
+            if (m_bridge->overlayProvider() == this) m_bridge->setOverlayProvider(nullptr);
+        }
+        m_bridge->requestCanvasRepaint();
+    }
 }
 
 EffectDialog::SliderControls EffectDialog::addSlider(const QString& labelText, int minVal, int maxVal,
@@ -113,6 +182,12 @@ void EffectDialog::updatePreview() {
 }
 
 void EffectDialog::reject() {
+    if (m_bridge) {
+        if (m_bridge->pointReceiver() == this) m_bridge->setPointReceiver(nullptr);
+        if (m_bridge->overlayProvider() == this) m_bridge->setOverlayProvider(nullptr);
+        m_bridge->requestCanvasRepaint();
+    }
+
     if (m_doc && m_layerIndex >= 0) {
         auto layer = m_doc->layer(m_layerIndex);
         if (layer) {
@@ -124,6 +199,12 @@ void EffectDialog::reject() {
 }
 
 void EffectDialog::accept() {
+    if (m_bridge) {
+        if (m_bridge->pointReceiver() == this) m_bridge->setPointReceiver(nullptr);
+        if (m_bridge->overlayProvider() == this) m_bridge->setOverlayProvider(nullptr);
+        m_bridge->requestCanvasRepaint();
+    }
+
     if (m_doc && m_layerIndex >= 0) {
         m_doc->undoStack()->push(new LayerBitmapUndoCommand(m_doc, m_layerIndex, m_originalImage, m_effectName));
     }

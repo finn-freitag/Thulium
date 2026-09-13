@@ -276,8 +276,13 @@ void CanvasView::paintEvent(QPaintEvent* /*event*/) {
 
         // Tool overlay preview
         auto tool = m_toolMgr->activeTool();
-        if (tool) {
+        if (tool && !m_overlayProvider) {
             tool->drawOverlay(painter, m_renderOpts);
+        }
+
+        // Effect interactive overlay (e.g. crosshair, center point, radius)
+        if (m_overlayProvider) {
+            m_overlayProvider->drawCanvasOverlay(painter, m_renderOpts);
         }
     } else {
         painter.fillRect(0, 0, width() - rOffset, height() - rOffset, QColor(160, 160, 160));
@@ -298,6 +303,17 @@ void CanvasView::mousePressEvent(QMouseEvent* event) {
     }
 
     if (!m_doc) return;
+
+    if (m_pointReceiver && (event->button() == Qt::LeftButton || event->button() == Qt::RightButton)) {
+        m_pickingActive = true;
+        QPointF docPos = viewportToDoc(event->pos());
+        m_pointReceiver->onCanvasPointPicked(docPos);
+        update();
+        return;
+    }
+
+    if (m_interactionBlocked) return;
+
     QPointF docPos = viewportToDoc(event->pos());
     auto tool = m_toolMgr->activeTool();
     if (tool) {
@@ -320,6 +336,17 @@ void CanvasView::mouseMoveEvent(QMouseEvent* event) {
     int docY = static_cast<int>(docPos.y());
     emit cursorMoved(docX, docY);
 
+    if (m_pointReceiver) {
+        setCursor(Qt::CrossCursor);
+        if (m_pickingActive && (event->buttons() & Qt::LeftButton)) {
+            m_pointReceiver->onCanvasPointPicked(docPos);
+            update();
+        }
+        return;
+    }
+
+    if (m_interactionBlocked) return;
+
     auto tool = m_toolMgr->activeTool();
     if (tool) {
         tool->mouseMove(event, m_doc.get(), docPos, m_toolMgr->context());
@@ -331,10 +358,22 @@ void CanvasView::mouseMoveEvent(QMouseEvent* event) {
 void CanvasView::mouseReleaseEvent(QMouseEvent* event) {
     if (m_spacePanning && (event->button() == Qt::MiddleButton || !(event->modifiers() & Qt::AltModifier))) {
         m_spacePanning = false;
-        auto tool = m_toolMgr->activeTool();
-        setCursor(tool ? tool->cursor() : Qt::ArrowCursor);
+        if (m_pointReceiver) {
+            setCursor(Qt::CrossCursor);
+        } else {
+            auto tool = m_toolMgr->activeTool();
+            setCursor(tool ? tool->cursor() : Qt::ArrowCursor);
+        }
         return;
     }
+
+    if (m_pointReceiver && m_pickingActive) {
+        m_pickingActive = false;
+        setCursor(Qt::CrossCursor);
+        return;
+    }
+
+    if (m_interactionBlocked) return;
 
     if (!m_doc) return;
     QPointF docPos = viewportToDoc(event->pos());
@@ -380,6 +419,33 @@ void CanvasView::keyPressEvent(QKeyEvent* event) {
     }
 
     QWidget::keyPressEvent(event);
+}
+
+void CanvasView::setPointReceiver(ICanvasPointReceiver* receiver) {
+    m_pointReceiver = receiver;
+    if (m_pointReceiver) {
+        setCursor(Qt::CrossCursor);
+    } else {
+        auto tool = m_toolMgr->activeTool();
+        setCursor(tool ? tool->cursor() : Qt::ArrowCursor);
+    }
+    update();
+}
+
+void CanvasView::setOverlayProvider(ICanvasOverlayProvider* provider) {
+    m_overlayProvider = provider;
+    update();
+}
+
+void CanvasView::requestCanvasRepaint() {
+    update();
+}
+
+void CanvasView::setInteractionBlocked(bool blocked) {
+    m_interactionBlocked = blocked;
+    if (blocked) {
+        m_pickingActive = false;
+    }
 }
 
 } // namespace pdn

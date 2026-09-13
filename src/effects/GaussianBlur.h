@@ -1,11 +1,7 @@
 #pragma once
 
 #include "IEffect.h"
-#include <QDialog>
-#include <QSlider>
-#include <QSpinBox>
-#include <QLabel>
-#include <QPushButton>
+#include "EffectDialog.h"
 
 namespace pdn {
 
@@ -20,27 +16,18 @@ public:
     static void process(QImage& image, const Selection& selection, int radius);
 };
 
-class GaussianBlurDialog : public QDialog {
+class GaussianBlurDialog : public EffectDialog {
     Q_OBJECT
 public:
     GaussianBlurDialog(Document* doc, QWidget* parent = nullptr);
 
-    int radius() const { return m_radiusSlider->value(); }
+    int radius() const { return m_radius; }
 
 protected:
-    void reject() override;
-
-private slots:
-    void onValueChanged();
-    void onReset();
+    void processPreview(QImage& image) override;
 
 private:
-    Document* m_doc;
-    QImage m_originalImage;
-    int m_layerIndex;
-
-    QSlider* m_radiusSlider;
-    QSpinBox* m_radiusSpin;
+    int m_radius = 2;
 };
 
 } // namespace pdn

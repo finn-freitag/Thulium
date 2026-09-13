@@ -44,7 +44,8 @@ public:
     bool apply(QImage& image, const Selection& selection) override;
     bool showDialog(QWidget* parent, Document* doc) override;
 
-    static void process(QImage& image, const Selection& selection, int angle);
+    static void process(QImage& image, const Selection& selection, int angle,
+                        const QPointF& center = QPointF(-1, -1));
 };
 
 class RadialBlurDialog : public EffectDialog {
@@ -53,12 +54,20 @@ public:
     RadialBlurDialog(Document* doc, QWidget* parent = nullptr);
 
     int angle() const { return m_angle; }
+    QPointF center() const { return m_center; }
+
+    void onCanvasPointPicked(const QPointF& docPos) override;
+    void drawCanvasOverlay(QPainter& painter, const RenderOptions& opts) override;
 
 protected:
     void processPreview(QImage& image) override;
+    void onReset() override;
 
 private:
     int m_angle = 10;
+    QPointF m_center;
+    SliderControls m_centerXCtrl;
+    SliderControls m_centerYCtrl;
 };
 
 } // namespace pdn

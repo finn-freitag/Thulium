@@ -69,6 +69,7 @@ set(PDN_SOURCES
     src/tools/ToolManager.cpp
 
     src/effects/IEffect.h
+    src/effects/ICanvasInteraction.h
     src/effects/EffectDialog.h
     src/effects/EffectDialog.cpp
     src/effects/BrightnessContrast.h

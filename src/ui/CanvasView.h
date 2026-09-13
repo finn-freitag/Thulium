@@ -7,10 +7,11 @@
 #include "../core/Document.h"
 #include "../rendering/IRenderer.h"
 #include "../tools/ToolManager.h"
+#include "../effects/ICanvasInteraction.h"
 
 namespace pdn {
 
-class CanvasView : public QWidget {
+class CanvasView : public QWidget, public ICanvasInteractionBridge {
     Q_OBJECT
 public:
     explicit CanvasView(ToolManager* toolMgr, QWidget* parent = nullptr);
@@ -40,6 +41,18 @@ public:
 
     IRenderer* renderer() { return m_renderer.get(); }
 
+    // ICanvasInteractionBridge
+    void setPointReceiver(ICanvasPointReceiver* receiver) override;
+    ICanvasPointReceiver* pointReceiver() const override { return m_pointReceiver; }
+
+    void setOverlayProvider(ICanvasOverlayProvider* provider) override;
+    ICanvasOverlayProvider* overlayProvider() const override { return m_overlayProvider; }
+
+    void requestCanvasRepaint() override;
+
+    void setInteractionBlocked(bool blocked);
+    bool isInteractionBlocked() const { return m_interactionBlocked; }
+
 signals:
     void cursorMoved(int docX, int docY);
     void zoomChanged(double zoom);
@@ -67,6 +80,11 @@ private:
     bool m_spacePanning = false;
     QPoint m_lastMousePos;
     int m_rulerWidth = 18;
+
+    ICanvasPointReceiver* m_pointReceiver = nullptr;
+    ICanvasOverlayProvider* m_overlayProvider = nullptr;
+    bool m_pickingActive = false;
+    bool m_interactionBlocked = false;
 };
 
 } // namespace pdn

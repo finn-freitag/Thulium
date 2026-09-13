@@ -269,6 +269,76 @@ int main() {
         assert(outside.red() == 100);
     }
 
-    std::cout << "\n>>> ALL 20 Effects and Adjustments tests PASSED successfully! <<<\n" << std::endl;
+    // 21. Test Custom Center Point in Vignette
+    {
+        QImage img(64, 64, QImage::Format_ARGB32);
+        img.fill(QColor(200, 200, 200, 255));
+        // Put center at top-left corner (0, 0)
+        pdn::VignetteEffect::process(img, emptySel, 40, 80, QPointF(0, 0));
+        QColor atCenter = img.pixelColor(0, 0);
+        QColor atFarCorner = img.pixelColor(63, 63);
+        std::cout << "[21] Vignette with Center (0,0): Center R=" << atCenter.red() << ", Far Corner R=" << atFarCorner.red() << std::endl;
+        assert(atCenter.red() == 200);
+        assert(atFarCorner.red() < 100);
+    }
+
+    // 22. Test Custom Center Point in Twist
+    {
+        QImage img(64, 64, QImage::Format_ARGB32);
+        img.fill(Qt::black);
+        // Draw cross lines through (16, 16)
+        for (int i = 0; i < 64; ++i) {
+            img.setPixelColor(16, i, Qt::white);
+            img.setPixelColor(i, 16, Qt::white);
+        }
+        pdn::TwistEffect::process(img, emptySel, 60, 40, QPointF(16, 16));
+        // The center itself at (16, 16) stays white
+        QColor centerPx = img.pixelColor(16, 16);
+        std::cout << "[22] Twist with Center (16,16): Center R=" << centerPx.red() << " (expected 255)" << std::endl;
+        assert(centerPx.red() == 255);
+    }
+
+    // 23. Test ICanvasInteractionBridge
+    {
+        class MockReceiver : public pdn::ICanvasPointReceiver {
+        public:
+            QPointF pickedPoint;
+            bool called = false;
+            void onCanvasPointPicked(const QPointF& docPos) override {
+                pickedPoint = docPos;
+                called = true;
+            }
+        };
+
+        class MockBridge : public pdn::ICanvasInteractionBridge {
+        public:
+            pdn::ICanvasPointReceiver* receiver = nullptr;
+            pdn::ICanvasOverlayProvider* provider = nullptr;
+            bool repainted = false;
+
+            void setPointReceiver(pdn::ICanvasPointReceiver* r) override { receiver = r; }
+            pdn::ICanvasPointReceiver* pointReceiver() const override { return receiver; }
+
+            void setOverlayProvider(pdn::ICanvasOverlayProvider* p) override { provider = p; }
+            pdn::ICanvasOverlayProvider* overlayProvider() const override { return provider; }
+
+            void requestCanvasRepaint() override { repainted = true; }
+        };
+
+        MockBridge bridge;
+        MockReceiver receiver;
+        bridge.setPointReceiver(&receiver);
+        assert(bridge.pointReceiver() == &receiver);
+
+        bridge.pointReceiver()->onCanvasPointPicked(QPointF(42.5, 99.0));
+        assert(receiver.called);
+        assert(receiver.pickedPoint == QPointF(42.5, 99.0));
+
+        bridge.requestCanvasRepaint();
+        assert(bridge.repainted);
+        std::cout << "[23] ICanvasInteractionBridge coordinate picking test passed." << std::endl;
+    }
+
+    std::cout << "\n>>> ALL 23 Effects, Adjustments, Center Picking & Bridge tests PASSED successfully! <<<\n" << std::endl;
     return 0;
 }

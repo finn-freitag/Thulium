@@ -187,75 +187,15 @@ bool GaussianBlurEffect::showDialog(QWidget* parent, Document* doc) {
 }
 
 GaussianBlurDialog::GaussianBlurDialog(Document* doc, QWidget* parent)
-    : QDialog(parent), m_doc(doc) {
-    setWindowTitle("Gaussian Blur");
-    setFixedSize(360, 160);
+    : EffectDialog(doc, "Gaussian Blur", parent) {
+    addSlider("Radius (pixels):", 1, 100, m_radius, [this](int val) { m_radius = val; });
 
-    m_layerIndex = doc->activeLayerIndex();
-    m_originalImage = doc->activeLayer()->image().copy();
-
-    QVBoxLayout* mainLayout = new QVBoxLayout(this);
-
-    QLabel* rLabel = new QLabel("Radius (pixels):", this);
-    QHBoxLayout* rLayout = new QHBoxLayout();
-    m_radiusSlider = new QSlider(Qt::Horizontal, this);
-    m_radiusSlider->setRange(1, 100);
-    m_radiusSlider->setValue(2);
-    m_radiusSpin = new QSpinBox(this);
-    m_radiusSpin->setRange(1, 100);
-    m_radiusSpin->setValue(2);
-    rLayout->addWidget(m_radiusSlider);
-    rLayout->addWidget(m_radiusSpin);
-
-    connect(m_radiusSlider, &QSlider::valueChanged, m_radiusSpin, &QSpinBox::setValue);
-    connect(m_radiusSpin, QOverload<int>::of(&QSpinBox::valueChanged), m_radiusSlider, &QSlider::setValue);
-    connect(m_radiusSlider, &QSlider::valueChanged, this, &GaussianBlurDialog::onValueChanged);
-
-    QHBoxLayout* btnLayout = new QHBoxLayout();
-    QPushButton* resetBtn = new QPushButton("Reset", this);
-    connect(resetBtn, &QPushButton::clicked, this, &GaussianBlurDialog::onReset);
-
-    QDialogButtonBox* bbox = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, this);
-    connect(bbox, &QDialogButtonBox::accepted, this, [this]() {
-        m_doc->undoStack()->push(new LayerBitmapUndoCommand(m_doc, m_layerIndex, m_originalImage, "Gaussian Blur"));
-        accept();
-    });
-    connect(bbox, &QDialogButtonBox::rejected, this, &GaussianBlurDialog::reject);
-
-    btnLayout->addWidget(resetBtn);
-    btnLayout->addStretch();
-    btnLayout->addWidget(bbox);
-
-    mainLayout->addWidget(rLabel);
-    mainLayout->addLayout(rLayout);
-    mainLayout->addStretch();
-    mainLayout->addLayout(btnLayout);
-
-    // Initial preview
-    onValueChanged();
+    setupButtons();
+    updatePreview();
 }
 
-void GaussianBlurDialog::onValueChanged() {
-    auto layer = m_doc->layer(m_layerIndex);
-    if (!layer) return;
-
-    QImage copy = m_originalImage.copy();
-    GaussianBlurEffect::process(copy, m_doc->selection(), m_radiusSlider->value());
-    layer->setImage(copy);
-    emit m_doc->documentChanged();
-}
-
-void GaussianBlurDialog::onReset() {
-    m_radiusSlider->setValue(2);
-}
-
-void GaussianBlurDialog::reject() {
-    auto layer = m_doc->layer(m_layerIndex);
-    if (layer) {
-        layer->setImage(m_originalImage.copy());
-        emit m_doc->documentChanged();
-    }
-    QDialog::reject();
+void GaussianBlurDialog::processPreview(QImage& image) {
+    GaussianBlurEffect::process(image, m_doc->selection(), m_radius);
 }
 
 } // namespace pdn

@@ -60,6 +60,7 @@ MainWindow::MainWindow(QWidget* parent)
 
     m_documentStrip = new DocumentStrip(this);
     m_canvasView = new CanvasView(m_toolMgr, this);
+    EffectDialog::setGlobalCanvasBridge(m_canvasView);
 
     QWidget* centralContainer = new QWidget(this);
     QVBoxLayout* centralLayout = new QVBoxLayout(centralContainer);
@@ -1151,9 +1152,34 @@ void MainWindow::onLayerProperties() {
     }
 }
 
+ICanvasInteractionBridge* MainWindow::canvasBridge() {
+    return m_canvasView;
+}
+
 void MainWindow::runEffect(const std::shared_ptr<IEffect>& effect) {
     if (!m_doc || !effect) return;
-    if (effect->showDialog(this, m_doc.get())) {
+
+    if (m_canvasView) {
+        m_canvasView->setInteractionBlocked(true);
+    }
+    menuBar()->setEnabled(false);
+    m_toolsDock->setEnabled(false);
+    m_historyDock->setEnabled(false);
+    m_layersDock->setEnabled(false);
+    m_colorsDock->setEnabled(false);
+
+    bool accepted = effect->showDialog(this, m_doc.get());
+
+    menuBar()->setEnabled(true);
+    m_toolsDock->setEnabled(true);
+    m_historyDock->setEnabled(true);
+    m_layersDock->setEnabled(true);
+    m_colorsDock->setEnabled(true);
+    if (m_canvasView) {
+        m_canvasView->setInteractionBlocked(false);
+    }
+
+    if (accepted) {
         m_lastEffect = effect;
         if (m_repeatEffectAct) {
             m_repeatEffectAct->setEnabled(true);

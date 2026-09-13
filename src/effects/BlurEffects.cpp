@@ -86,7 +86,7 @@ void MotionBlurDialog::processPreview(QImage& image) {
 // ==========================================
 // Radial Blur
 // ==========================================
-void RadialBlurEffect::process(QImage& image, const Selection& selection, int angle) {
+void RadialBlurEffect::process(QImage& image, const Selection& selection, int angle, const QPointF& center) {
     if (angle <= 0) return;
 
     int w = image.width();
@@ -94,8 +94,8 @@ void RadialBlurEffect::process(QImage& image, const Selection& selection, int an
     if (w <= 0 || h <= 0) return;
 
     QImage src = image.copy();
-    double cx = w * 0.5;
-    double cy = h * 0.5;
+    double cx = (center.x() >= 0.0) ? center.x() : (w * 0.5);
+    double cy = (center.y() >= 0.0) ? center.y() : (h * 0.5);
 
     double maxRad = (angle * M_PI / 180.0) * 0.15;
     const int numSamples = 11;
@@ -153,14 +153,78 @@ bool RadialBlurEffect::showDialog(QWidget* parent, Document* doc) {
 
 RadialBlurDialog::RadialBlurDialog(Document* doc, QWidget* parent)
     : EffectDialog(doc, "Radial Blur", parent) {
-    addSlider("Angle:", 1, 100, m_angle, [this](int val) { m_angle = val; });
+    int docW = doc ? doc->width() : 800;
+    int docH = doc ? doc->height() : 600;
+    m_center = QPointF(docW * 0.5, docH * 0.5);
 
+    addSlider("Angle:", 1, 100, m_angle, [this](int val) {
+        m_angle = val;
+        if (m_bridge) m_bridge->requestCanvasRepaint();
+    });
+
+    m_centerXCtrl = addSlider("Center X (pixels):", 0, docW, static_cast<int>(m_center.x()), [this](int val) {
+        m_center.setX(val);
+        if (m_bridge) m_bridge->requestCanvasRepaint();
+    });
+    m_centerYCtrl = addSlider("Center Y (pixels):", 0, docH, static_cast<int>(m_center.y()), [this](int val) {
+        m_center.setY(val);
+        if (m_bridge) m_bridge->requestCanvasRepaint();
+    });
+
+    QLabel* tip = new QLabel("Tip: Click or drag on the canvas to set center point.", this);
+    tip->setStyleSheet("color: #777; font-style: italic;");
+    addCustomWidget(tip);
+
+    enablePointPicking(true);
     setupButtons();
     updatePreview();
 }
 
+void RadialBlurDialog::onCanvasPointPicked(const QPointF& docPos) {
+    int docW = m_doc ? m_doc->width() : 1000;
+    int docH = m_doc ? m_doc->height() : 1000;
+    m_center = QPointF(std::clamp(docPos.x(), 0.0, static_cast<double>(docW)),
+                       std::clamp(docPos.y(), 0.0, static_cast<double>(docH)));
+
+    if (m_centerXCtrl.slider && m_centerXCtrl.spin) {
+        m_centerXCtrl.slider->blockSignals(true);
+        m_centerXCtrl.spin->blockSignals(true);
+        m_centerXCtrl.slider->setValue(static_cast<int>(std::round(m_center.x())));
+        m_centerXCtrl.spin->setValue(static_cast<int>(std::round(m_center.x())));
+        m_centerXCtrl.slider->blockSignals(false);
+        m_centerXCtrl.spin->blockSignals(false);
+    }
+
+    if (m_centerYCtrl.slider && m_centerYCtrl.spin) {
+        m_centerYCtrl.slider->blockSignals(true);
+        m_centerYCtrl.spin->blockSignals(true);
+        m_centerYCtrl.slider->setValue(static_cast<int>(std::round(m_center.y())));
+        m_centerYCtrl.spin->setValue(static_cast<int>(std::round(m_center.y())));
+        m_centerYCtrl.slider->blockSignals(false);
+        m_centerYCtrl.spin->blockSignals(false);
+    }
+
+    updatePreview();
+    if (m_bridge) {
+        m_bridge->requestCanvasRepaint();
+    }
+}
+
+void RadialBlurDialog::drawCanvasOverlay(QPainter& painter, const RenderOptions& opts) {
+    drawCrosshairOverlay(painter, m_center, opts.zoom, opts.panOffset);
+}
+
+void RadialBlurDialog::onReset() {
+    int docW = m_doc ? m_doc->width() : 800;
+    int docH = m_doc ? m_doc->height() : 600;
+    m_center = QPointF(docW * 0.5, docH * 0.5);
+    if (m_centerXCtrl.slider) m_centerXCtrl.slider->setValue(static_cast<int>(m_center.x()));
+    if (m_centerYCtrl.slider) m_centerYCtrl.slider->setValue(static_cast<int>(m_center.y()));
+    if (m_bridge) m_bridge->requestCanvasRepaint();
+}
+
 void RadialBlurDialog::processPreview(QImage& image) {
-    RadialBlurEffect::process(image, m_doc->selection(), m_angle);
+    RadialBlurEffect::process(image, m_doc->selection(), m_angle, m_center);
 }
 
 } // namespace pdn

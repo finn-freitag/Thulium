@@ -1,8 +1,4 @@
 #include "BrightnessContrast.h"
-#include "../core/History.h"
-#include <QVBoxLayout>
-#include <QHBoxLayout>
-#include <QDialogButtonBox>
 #include <algorithm>
 #include <cmath>
 
@@ -55,95 +51,16 @@ bool BrightnessContrastEffect::showDialog(QWidget* parent, Document* doc) {
 }
 
 BrightnessContrastDialog::BrightnessContrastDialog(Document* doc, QWidget* parent)
-    : QDialog(parent), m_doc(doc) {
-    setWindowTitle("Brightness / Contrast");
-    setFixedSize(360, 220);
+    : EffectDialog(doc, "Brightness / Contrast", parent) {
+    addSlider("Brightness:", -100, 100, m_brightness, [this](int val) { m_brightness = val; });
+    addSlider("Contrast:", -100, 100, m_contrast, [this](int val) { m_contrast = val; });
 
-    m_layerIndex = doc->activeLayerIndex();
-    m_originalImage = doc->activeLayer()->image().copy();
-
-    QVBoxLayout* mainLayout = new QVBoxLayout(this);
-
-    // Brightness row
-    QLabel* bLabel = new QLabel("Brightness:", this);
-    QHBoxLayout* bLayout = new QHBoxLayout();
-    m_brightnessSlider = new QSlider(Qt::Horizontal, this);
-    m_brightnessSlider->setRange(-100, 100);
-    m_brightnessSlider->setValue(0);
-    m_brightnessSpin = new QSpinBox(this);
-    m_brightnessSpin->setRange(-100, 100);
-    m_brightnessSpin->setValue(0);
-    bLayout->addWidget(m_brightnessSlider);
-    bLayout->addWidget(m_brightnessSpin);
-
-    // Contrast row
-    QLabel* cLabel = new QLabel("Contrast:", this);
-    QHBoxLayout* cLayout = new QHBoxLayout();
-    m_contrastSlider = new QSlider(Qt::Horizontal, this);
-    m_contrastSlider->setRange(-100, 100);
-    m_contrastSlider->setValue(0);
-    m_contrastSpin = new QSpinBox(this);
-    m_contrastSpin->setRange(-100, 100);
-    m_contrastSpin->setValue(0);
-    cLayout->addWidget(m_contrastSlider);
-    cLayout->addWidget(m_contrastSpin);
-
-    // Sync sliders and spins
-    connect(m_brightnessSlider, &QSlider::valueChanged, m_brightnessSpin, &QSpinBox::setValue);
-    connect(m_brightnessSpin, QOverload<int>::of(&QSpinBox::valueChanged), m_brightnessSlider, &QSlider::setValue);
-    connect(m_contrastSlider, &QSlider::valueChanged, m_contrastSpin, &QSpinBox::setValue);
-    connect(m_contrastSpin, QOverload<int>::of(&QSpinBox::valueChanged), m_contrastSlider, &QSlider::setValue);
-
-    connect(m_brightnessSlider, &QSlider::valueChanged, this, &BrightnessContrastDialog::onValueChanged);
-    connect(m_contrastSlider, &QSlider::valueChanged, this, &BrightnessContrastDialog::onValueChanged);
-
-    // Buttons
-    QHBoxLayout* btnLayout = new QHBoxLayout();
-    QPushButton* resetBtn = new QPushButton("Reset", this);
-    connect(resetBtn, &QPushButton::clicked, this, &BrightnessContrastDialog::onReset);
-
-    QDialogButtonBox* bbox = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, this);
-    connect(bbox, &QDialogButtonBox::accepted, this, [this]() {
-        // Push undo command
-        m_doc->undoStack()->push(new LayerBitmapUndoCommand(m_doc, m_layerIndex, m_originalImage, "Brightness / Contrast"));
-        accept();
-    });
-    connect(bbox, &QDialogButtonBox::rejected, this, &BrightnessContrastDialog::reject);
-
-    btnLayout->addWidget(resetBtn);
-    btnLayout->addStretch();
-    btnLayout->addWidget(bbox);
-
-    mainLayout->addWidget(bLabel);
-    mainLayout->addLayout(bLayout);
-    mainLayout->addWidget(cLabel);
-    mainLayout->addLayout(cLayout);
-    mainLayout->addStretch();
-    mainLayout->addLayout(btnLayout);
+    setupButtons();
+    updatePreview();
 }
 
-void BrightnessContrastDialog::onValueChanged() {
-    auto layer = m_doc->layer(m_layerIndex);
-    if (!layer) return;
-
-    QImage copy = m_originalImage.copy();
-    BrightnessContrastEffect::process(copy, m_doc->selection(), m_brightnessSlider->value(), m_contrastSlider->value());
-    layer->setImage(copy);
-    emit m_doc->documentChanged();
-}
-
-void BrightnessContrastDialog::onReset() {
-    m_brightnessSlider->setValue(0);
-    m_contrastSlider->setValue(0);
-}
-
-void BrightnessContrastDialog::reject() {
-    auto layer = m_doc->layer(m_layerIndex);
-    if (layer) {
-        layer->setImage(m_originalImage.copy());
-        emit m_doc->documentChanged();
-    }
-    QDialog::reject();
+void BrightnessContrastDialog::processPreview(QImage& image) {
+    BrightnessContrastEffect::process(image, m_doc->selection(), m_brightness, m_contrast);
 }
 
 } // namespace pdn

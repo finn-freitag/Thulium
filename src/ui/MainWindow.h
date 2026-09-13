@@ -57,6 +57,7 @@ public:
 
     ToolManager* toolManager() const { return m_toolMgr; }
     CanvasView* canvasView() const { return m_canvasView; }
+    ICanvasInteractionBridge* canvasBridge();
     DocumentStrip* documentStrip() const { return m_documentStrip; }
 
     static QPoint lastCopiedPos() { return s_lastCopiedPos; }

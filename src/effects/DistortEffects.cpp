@@ -86,7 +86,7 @@ void PixelateDialog::processPreview(QImage& image) {
 // ==========================================
 // Twist
 // ==========================================
-void TwistEffect::process(QImage& image, const Selection& selection, int amount, int size) {
+void TwistEffect::process(QImage& image, const Selection& selection, int amount, int size, const QPointF& center) {
     if (amount == 0 || size <= 0) return;
 
     int w = image.width();
@@ -94,8 +94,8 @@ void TwistEffect::process(QImage& image, const Selection& selection, int amount,
     if (w <= 0 || h <= 0) return;
 
     QImage src = image.copy();
-    double cx = w * 0.5;
-    double cy = h * 0.5;
+    double cx = (center.x() >= 0.0) ? center.x() : (w * 0.5);
+    double cy = (center.y() >= 0.0) ? center.y() : (h * 0.5);
     double maxDim = std::max(w, h);
     double radius = (maxDim * 0.5) * (std::clamp(size, 1, 100) / 100.0);
     double maxAngle = (amount / 100.0) * M_PI * 2.0;
@@ -141,15 +141,86 @@ bool TwistEffect::showDialog(QWidget* parent, Document* doc) {
 
 TwistDialog::TwistDialog(Document* doc, QWidget* parent)
     : EffectDialog(doc, "Twist", parent) {
-    addSlider("Amount / Direction:", -100, 100, m_amount, [this](int val) { m_amount = val; });
-    addSlider("Size (%):", 1, 100, m_size, [this](int val) { m_size = val; });
+    int docW = doc ? doc->width() : 800;
+    int docH = doc ? doc->height() : 600;
+    m_center = QPointF(docW * 0.5, docH * 0.5);
 
+    addSlider("Amount / Direction:", -100, 100, m_amount, [this](int val) {
+        m_amount = val;
+        if (m_bridge) m_bridge->requestCanvasRepaint();
+    });
+    addSlider("Size (%):", 1, 100, m_size, [this](int val) {
+        m_size = val;
+        if (m_bridge) m_bridge->requestCanvasRepaint();
+    });
+
+    m_centerXCtrl = addSlider("Center X (pixels):", 0, docW, static_cast<int>(m_center.x()), [this](int val) {
+        m_center.setX(val);
+        if (m_bridge) m_bridge->requestCanvasRepaint();
+    });
+    m_centerYCtrl = addSlider("Center Y (pixels):", 0, docH, static_cast<int>(m_center.y()), [this](int val) {
+        m_center.setY(val);
+        if (m_bridge) m_bridge->requestCanvasRepaint();
+    });
+
+    QLabel* tip = new QLabel("Tip: Click or drag on the canvas to set center point.", this);
+    tip->setStyleSheet("color: #777; font-style: italic;");
+    addCustomWidget(tip);
+
+    enablePointPicking(true);
     setupButtons();
     updatePreview();
 }
 
+void TwistDialog::onCanvasPointPicked(const QPointF& docPos) {
+    int docW = m_doc ? m_doc->width() : 1000;
+    int docH = m_doc ? m_doc->height() : 1000;
+    m_center = QPointF(std::clamp(docPos.x(), 0.0, static_cast<double>(docW)),
+                       std::clamp(docPos.y(), 0.0, static_cast<double>(docH)));
+
+    if (m_centerXCtrl.slider && m_centerXCtrl.spin) {
+        m_centerXCtrl.slider->blockSignals(true);
+        m_centerXCtrl.spin->blockSignals(true);
+        m_centerXCtrl.slider->setValue(static_cast<int>(std::round(m_center.x())));
+        m_centerXCtrl.spin->setValue(static_cast<int>(std::round(m_center.x())));
+        m_centerXCtrl.slider->blockSignals(false);
+        m_centerXCtrl.spin->blockSignals(false);
+    }
+
+    if (m_centerYCtrl.slider && m_centerYCtrl.spin) {
+        m_centerYCtrl.slider->blockSignals(true);
+        m_centerYCtrl.spin->blockSignals(true);
+        m_centerYCtrl.slider->setValue(static_cast<int>(std::round(m_center.y())));
+        m_centerYCtrl.spin->setValue(static_cast<int>(std::round(m_center.y())));
+        m_centerYCtrl.slider->blockSignals(false);
+        m_centerYCtrl.spin->blockSignals(false);
+    }
+
+    updatePreview();
+    if (m_bridge) {
+        m_bridge->requestCanvasRepaint();
+    }
+}
+
+void TwistDialog::drawCanvasOverlay(QPainter& painter, const RenderOptions& opts) {
+    int docW = m_doc ? m_doc->width() : 800;
+    int docH = m_doc ? m_doc->height() : 600;
+    double maxDim = std::max(docW, docH);
+    double radius = (maxDim * 0.5) * (std::clamp(m_size, 1, 100) / 100.0);
+    drawCrosshairOverlay(painter, m_center, opts.zoom, opts.panOffset, radius);
+}
+
+void TwistDialog::onReset() {
+    int docW = m_doc ? m_doc->width() : 800;
+    int docH = m_doc ? m_doc->height() : 600;
+    m_center = QPointF(docW * 0.5, docH * 0.5);
+    if (m_centerXCtrl.slider) m_centerXCtrl.slider->setValue(static_cast<int>(m_center.x()));
+    if (m_centerYCtrl.slider) m_centerYCtrl.slider->setValue(static_cast<int>(m_center.y()));
+    if (m_bridge) m_bridge->requestCanvasRepaint();
+}
+
 void TwistDialog::processPreview(QImage& image) {
-    TwistEffect::process(image, m_doc->selection(), m_amount, m_size);
+    TwistEffect::process(image, m_doc->selection(), m_amount, m_size, m_center);
 }
 
 } // namespace pdn

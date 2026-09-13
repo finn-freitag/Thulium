@@ -152,16 +152,17 @@ void GlowDialog::processPreview(QImage& image) {
 // ==========================================
 // Vignette
 // ==========================================
-void VignetteEffect::process(QImage& image, const Selection& selection, int radius, int density) {
+void VignetteEffect::process(QImage& image, const Selection& selection, int radius, int density, const QPointF& center) {
     if (density <= 0) return;
 
     int w = image.width();
     int h = image.height();
     if (w <= 0 || h <= 0) return;
 
-    double cx = w * 0.5;
-    double cy = h * 0.5;
-    double maxDist = std::sqrt(cx * cx + cy * cy);
+    double cx = (center.x() >= 0.0) ? center.x() : (w * 0.5);
+    double cy = (center.y() >= 0.0) ? center.y() : (h * 0.5);
+    double maxDist = std::max({ std::hypot(cx, cy), std::hypot(w - cx, cy),
+                                 std::hypot(cx, h - cy), std::hypot(w - cx, h - cy) });
     double innerDist = maxDist * (radius / 100.0);
     double range = maxDist - innerDist;
     if (range < 1.0) range = 1.0;
@@ -205,15 +206,82 @@ bool VignetteEffect::showDialog(QWidget* parent, Document* doc) {
 
 VignetteDialog::VignetteDialog(Document* doc, QWidget* parent)
     : EffectDialog(doc, "Vignette", parent) {
-    addSlider("Radius (%):", 10, 100, m_radius, [this](int val) { m_radius = val; });
-    addSlider("Density (%):", 0, 100, m_density, [this](int val) { m_density = val; });
+    int docW = doc ? doc->width() : 800;
+    int docH = doc ? doc->height() : 600;
+    m_center = QPointF(docW * 0.5, docH * 0.5);
 
+    addSlider("Radius (%):", 10, 100, m_radius, [this](int val) {
+        m_radius = val;
+        if (m_bridge) m_bridge->requestCanvasRepaint();
+    });
+    addSlider("Density (%):", 0, 100, m_density, [this](int val) {
+        m_density = val;
+        if (m_bridge) m_bridge->requestCanvasRepaint();
+    });
+
+    m_centerXCtrl = addSlider("Center X (pixels):", 0, docW, static_cast<int>(m_center.x()), [this](int val) {
+        m_center.setX(val);
+        if (m_bridge) m_bridge->requestCanvasRepaint();
+    });
+    m_centerYCtrl = addSlider("Center Y (pixels):", 0, docH, static_cast<int>(m_center.y()), [this](int val) {
+        m_center.setY(val);
+        if (m_bridge) m_bridge->requestCanvasRepaint();
+    });
+
+    QLabel* tip = new QLabel("Tip: Click or drag on the canvas to set center point.", this);
+    tip->setStyleSheet("color: #777; font-style: italic;");
+    addCustomWidget(tip);
+
+    enablePointPicking(true);
     setupButtons();
     updatePreview();
 }
 
+void VignetteDialog::onCanvasPointPicked(const QPointF& docPos) {
+    int docW = m_doc ? m_doc->width() : 1000;
+    int docH = m_doc ? m_doc->height() : 1000;
+    m_center = QPointF(std::clamp(docPos.x(), 0.0, static_cast<double>(docW)),
+                       std::clamp(docPos.y(), 0.0, static_cast<double>(docH)));
+
+    if (m_centerXCtrl.slider && m_centerXCtrl.spin) {
+        m_centerXCtrl.slider->blockSignals(true);
+        m_centerXCtrl.spin->blockSignals(true);
+        m_centerXCtrl.slider->setValue(static_cast<int>(std::round(m_center.x())));
+        m_centerXCtrl.spin->setValue(static_cast<int>(std::round(m_center.x())));
+        m_centerXCtrl.slider->blockSignals(false);
+        m_centerXCtrl.spin->blockSignals(false);
+    }
+
+    if (m_centerYCtrl.slider && m_centerYCtrl.spin) {
+        m_centerYCtrl.slider->blockSignals(true);
+        m_centerYCtrl.spin->blockSignals(true);
+        m_centerYCtrl.slider->setValue(static_cast<int>(std::round(m_center.y())));
+        m_centerYCtrl.spin->setValue(static_cast<int>(std::round(m_center.y())));
+        m_centerYCtrl.slider->blockSignals(false);
+        m_centerYCtrl.spin->blockSignals(false);
+    }
+
+    updatePreview();
+    if (m_bridge) {
+        m_bridge->requestCanvasRepaint();
+    }
+}
+
+void VignetteDialog::drawCanvasOverlay(QPainter& painter, const RenderOptions& opts) {
+    drawCrosshairOverlay(painter, m_center, opts.zoom, opts.panOffset);
+}
+
+void VignetteDialog::onReset() {
+    int docW = m_doc ? m_doc->width() : 800;
+    int docH = m_doc ? m_doc->height() : 600;
+    m_center = QPointF(docW * 0.5, docH * 0.5);
+    if (m_centerXCtrl.slider) m_centerXCtrl.slider->setValue(static_cast<int>(m_center.x()));
+    if (m_centerYCtrl.slider) m_centerYCtrl.slider->setValue(static_cast<int>(m_center.y()));
+    if (m_bridge) m_bridge->requestCanvasRepaint();
+}
+
 void VignetteDialog::processPreview(QImage& image) {
-    VignetteEffect::process(image, m_doc->selection(), m_radius, m_density);
+    VignetteEffect::process(image, m_doc->selection(), m_radius, m_density, m_center);
 }
 
 } // namespace pdn
