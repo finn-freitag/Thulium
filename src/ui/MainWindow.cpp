@@ -27,6 +27,14 @@
 #include <QUrl>
 #include <algorithm>
 
+static void initResources() {
+    static bool inited = false;
+    if (!inited) {
+        Q_INIT_RESOURCE(resources);
+        inited = true;
+    }
+}
+
 namespace pdn {
 
 QPoint MainWindow::s_lastCopiedPos = QPoint(0, 0);
@@ -37,6 +45,7 @@ MainWindow::MainWindow(QWidget* parent)
     : QMainWindow(parent),
       m_toolMgr(new ToolManager(this)),
       m_pluginMgr(new PluginManager(this)) {
+    initResources();
     setWindowTitle("Paint.NET Clone");
     resize(1200, 800);
     setAcceptDrops(true);
@@ -448,13 +457,13 @@ void MainWindow::setupMenus() {
 
     // --- Layers Menu ---
     QMenu* layersMenu = mb->addMenu("&Layers");
-    layersMenu->addAction("&Add New Layer", this, &MainWindow::onAddLayer, QKeySequence("Ctrl+Shift+N"));
-    QAction* delLayerAct = layersMenu->addAction("&Delete Layer", this, &MainWindow::onDeleteLayer);
+    layersMenu->addAction(QIcon(":/icons/layer-add.svg"), "&Add New Layer", this, &MainWindow::onAddLayer, QKeySequence("Ctrl+Shift+N"));
+    QAction* delLayerAct = layersMenu->addAction(QIcon(":/icons/layer-delete.svg"), "&Delete Layer", this, &MainWindow::onDeleteLayer);
     delLayerAct->setShortcut(QKeySequence("Ctrl+Shift+Delete"));
-    layersMenu->addAction("&Duplicate Layer", this, &MainWindow::onDuplicateLayer, QKeySequence("Ctrl+Shift+D"));
-    layersMenu->addAction("&Merge Layer Down", this, &MainWindow::onMergeDown, QKeySequence("Ctrl+M"));
+    layersMenu->addAction(QIcon(":/icons/layer-duplicate.svg"), "&Duplicate Layer", this, &MainWindow::onDuplicateLayer, QKeySequence("Ctrl+Shift+D"));
+    layersMenu->addAction(QIcon(":/icons/layer-merge-down.svg"), "&Merge Layer Down", this, &MainWindow::onMergeDown, QKeySequence("Ctrl+M"));
     layersMenu->addSeparator();
-    layersMenu->addAction("Layer &Properties...", this, &MainWindow::onLayerProperties, QKeySequence("F4"));
+    layersMenu->addAction(QIcon(":/icons/layer-properties.svg"), "Layer &Properties...", this, &MainWindow::onLayerProperties, QKeySequence("F4"));
 
     // --- Adjustments Menu ---
     QMenu* adjMenu = mb->addMenu("&Adjustments");

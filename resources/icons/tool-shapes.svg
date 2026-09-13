@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24">
+  <!-- Blue square in back -->
+  <rect x="3" y="4" width="11" height="11" rx="1" fill="#38BDF8" stroke="#0284C7" stroke-width="1.2"/>
+  <!-- Coral circle in front -->
+  <circle cx="15" cy="14" r="6" fill="#F43F5E" stroke="#BE123C" stroke-width="1.2"/>
+  <!-- Amber triangle overlay -->
+  <polygon points="11,3 16,11 6,11" fill="#FBBF24" stroke="#D97706" stroke-width="1.2" stroke-linejoin="round"/>
+</svg>

@@ -5,11 +5,20 @@
 #include <QHBoxLayout>
 #include <QCheckBox>
 
+static void initResources() {
+    static bool inited = false;
+    if (!inited) {
+        Q_INIT_RESOURCE(resources);
+        inited = true;
+    }
+}
+
 namespace pdn {
 
 LayersDock::LayersDock(QWidget* parent) : QDockWidget("Layers", parent) {
     setObjectName("LayersDock");
     setAllowedAreas(Qt::LeftDockWidgetArea | Qt::RightDockWidgetArea);
+    initResources();
     setupUI();
 }
 
@@ -44,46 +53,45 @@ void LayersDock::setupUI() {
     QHBoxLayout* btnLayout = new QHBoxLayout();
     btnLayout->setSpacing(2);
 
+    auto configureBtn = [](QToolButton* btn, const QString& iconPath, const QString& fallbackText, const QString& toolTip) {
+        btn->setFocusPolicy(Qt::NoFocus);
+        btn->setFixedSize(26, 26);
+        btn->setIconSize(QSize(16, 16));
+        btn->setToolTip(toolTip);
+        QIcon icon(iconPath);
+        if (!icon.isNull()) {
+            btn->setIcon(icon);
+        } else {
+            btn->setText(fallbackText);
+        }
+    };
+
     m_addBtn = new QToolButton(container);
-    m_addBtn->setFocusPolicy(Qt::NoFocus);
-    m_addBtn->setText("+");
-    m_addBtn->setToolTip("Add New Layer (Ctrl+Shift+N)");
+    configureBtn(m_addBtn, ":/icons/layer-add.svg", "+", "Add New Layer (Ctrl+Shift+N)");
     connect(m_addBtn, &QToolButton::clicked, this, &LayersDock::onAddLayer);
 
     m_deleteBtn = new QToolButton(container);
-    m_deleteBtn->setFocusPolicy(Qt::NoFocus);
-    m_deleteBtn->setText("X");
-    m_deleteBtn->setToolTip("Delete Layer");
+    configureBtn(m_deleteBtn, ":/icons/layer-delete.svg", "X", "Delete Layer");
     connect(m_deleteBtn, &QToolButton::clicked, this, &LayersDock::onDeleteLayer);
 
     m_duplicateBtn = new QToolButton(container);
-    m_duplicateBtn->setFocusPolicy(Qt::NoFocus);
-    m_duplicateBtn->setText("Dup");
-    m_duplicateBtn->setToolTip("Duplicate Layer (Ctrl+Shift+D)");
+    configureBtn(m_duplicateBtn, ":/icons/layer-duplicate.svg", "Dup", "Duplicate Layer (Ctrl+Shift+D)");
     connect(m_duplicateBtn, &QToolButton::clicked, this, &LayersDock::onDuplicateLayer);
 
     m_mergeDownBtn = new QToolButton(container);
-    m_mergeDownBtn->setFocusPolicy(Qt::NoFocus);
-    m_mergeDownBtn->setText("Merge");
-    m_mergeDownBtn->setToolTip("Merge Layer Down (Ctrl+M)");
+    configureBtn(m_mergeDownBtn, ":/icons/layer-merge-down.svg", "Merge", "Merge Layer Down (Ctrl+M)");
     connect(m_mergeDownBtn, &QToolButton::clicked, this, &LayersDock::onMergeDown);
 
     m_moveUpBtn = new QToolButton(container);
-    m_moveUpBtn->setFocusPolicy(Qt::NoFocus);
-    m_moveUpBtn->setText("^");
-    m_moveUpBtn->setToolTip("Move Layer Up");
+    configureBtn(m_moveUpBtn, ":/icons/layer-move-up.svg", "^", "Move Layer Up");
     connect(m_moveUpBtn, &QToolButton::clicked, this, &LayersDock::onMoveUp);
 
     m_moveDownBtn = new QToolButton(container);
-    m_moveDownBtn->setFocusPolicy(Qt::NoFocus);
-    m_moveDownBtn->setText("v");
-    m_moveDownBtn->setToolTip("Move Layer Down");
+    configureBtn(m_moveDownBtn, ":/icons/layer-move-down.svg", "v", "Move Layer Down");
     connect(m_moveDownBtn, &QToolButton::clicked, this, &LayersDock::onMoveDown);
 
     m_propertiesBtn = new QToolButton(container);
-    m_propertiesBtn->setFocusPolicy(Qt::NoFocus);
-    m_propertiesBtn->setText("Prop");
-    m_propertiesBtn->setToolTip("Layer Properties (F4)");
+    configureBtn(m_propertiesBtn, ":/icons/layer-properties.svg", "Prop", "Layer Properties (F4)");
     connect(m_propertiesBtn, &QToolButton::clicked, this, &LayersDock::onProperties);
 
     btnLayout->addWidget(m_addBtn);

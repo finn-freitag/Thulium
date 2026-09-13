@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24">
+  <!-- Wand shaft -->
+  <line x1="4" y1="20" x2="13" y2="11" stroke="#312E81" stroke-width="2.5" stroke-linecap="round"/>
+  <!-- Wand tip -->
+  <line x1="13" y1="11" x2="16" y2="8" stroke="#E2E8F0" stroke-width="2.5" stroke-linecap="round"/>
+  <!-- Sparkles -->
+  <!-- Center top sparkle -->
+  <path d="M19 1 L19.8 4.2 L23 5 L19.8 5.8 L19 9 L18.2 5.8 L15 5 L18.2 4.2 Z" fill="#F59E0B" stroke="#D97706" stroke-width="0.3"/>
+  <!-- Right sparkle -->
+  <path d="M20 13 L20.5 14.8 L22 15 L20.5 15.2 L20 17 L19.5 15.2 L18 15 L19.5 14.8 Z" fill="#FBBF24"/>
+  <!-- Left sparkle -->
+  <path d="M11 3 L11.4 4.3 L13 4.5 L11.4 4.7 L11 6 L10.6 4.7 L9 4.5 L10.6 4.3 Z" fill="#FDE047"/>
+</svg>

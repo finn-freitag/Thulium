@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24">
+  <!-- Dashed pixel selection background -->
+  <rect x="5" y="5" width="14" height="14" fill="#0284C7" fill-opacity="0.12" stroke="#0284C7" stroke-width="1.2" stroke-dasharray="2 2"/>
+  <!-- 4-way direction arrows (filled blue) -->
+  <path d="M12 2 L15.5 5.5 H13 V9.5 H17 V7 L20.5 10.5 L17 14 V11.5 H13 V15.5 H15.5 L12 19 L8.5 15.5 H11 V11.5 H7 V14 L3.5 10.5 L7 7 V9.5 H11 V5.5 H8.5 Z" fill="#0284C7" stroke="#0369A1" stroke-width="0.8" stroke-linejoin="round"/>
+</svg>

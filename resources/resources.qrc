@@ -1,0 +1,51 @@
+<!DOCTYPE RCC>
+<RCC version="1.0">
+    <qresource prefix="/icons">
+        <file alias="rectangle-select.svg">icons/tool-rectangle-select.svg</file>
+        <file alias="tool-rectangle-select.svg">icons/tool-rectangle-select.svg</file>
+        <file alias="move-pixels.svg">icons/tool-move-pixels.svg</file>
+        <file alias="tool-move-pixels.svg">icons/tool-move-pixels.svg</file>
+        <file alias="lasso-select.svg">icons/tool-lasso-select.svg</file>
+        <file alias="tool-lasso-select.svg">icons/tool-lasso-select.svg</file>
+        <file alias="move-selection.svg">icons/tool-move-selection.svg</file>
+        <file alias="tool-move-selection.svg">icons/tool-move-selection.svg</file>
+        <file alias="ellipse-select.svg">icons/tool-ellipse-select.svg</file>
+        <file alias="tool-ellipse-select.svg">icons/tool-ellipse-select.svg</file>
+        <file alias="zoom.svg">icons/tool-zoom.svg</file>
+        <file alias="tool-zoom.svg">icons/tool-zoom.svg</file>
+        <file alias="magic-wand.svg">icons/tool-magic-wand.svg</file>
+        <file alias="tool-magic-wand.svg">icons/tool-magic-wand.svg</file>
+        <file alias="pan.svg">icons/tool-pan.svg</file>
+        <file alias="tool-pan.svg">icons/tool-pan.svg</file>
+        <file alias="paint-bucket.svg">icons/tool-paint-bucket.svg</file>
+        <file alias="tool-paint-bucket.svg">icons/tool-paint-bucket.svg</file>
+        <file alias="paint-brush.svg">icons/tool-paint-brush.svg</file>
+        <file alias="tool-paint-brush.svg">icons/tool-paint-brush.svg</file>
+        <file alias="eraser.svg">icons/tool-eraser.svg</file>
+        <file alias="tool-eraser.svg">icons/tool-eraser.svg</file>
+        <file alias="pencil.svg">icons/tool-pencil.svg</file>
+        <file alias="tool-pencil.svg">icons/tool-pencil.svg</file>
+        <file alias="color-picker.svg">icons/tool-color-picker.svg</file>
+        <file alias="tool-color-picker.svg">icons/tool-color-picker.svg</file>
+        <file alias="clone-stamp.svg">icons/tool-clone-stamp.svg</file>
+        <file alias="tool-clone-stamp.svg">icons/tool-clone-stamp.svg</file>
+        <file alias="recolor.svg">icons/tool-recolor.svg</file>
+        <file alias="tool-recolor.svg">icons/tool-recolor.svg</file>
+        <file alias="gradient.svg">icons/tool-gradient.svg</file>
+        <file alias="tool-gradient.svg">icons/tool-gradient.svg</file>
+        <file alias="text.svg">icons/tool-text.svg</file>
+        <file alias="tool-text.svg">icons/tool-text.svg</file>
+        <file alias="line-curve.svg">icons/tool-line-curve.svg</file>
+        <file alias="tool-line-curve.svg">icons/tool-line-curve.svg</file>
+        <file alias="shapes.svg">icons/tool-shapes.svg</file>
+        <file alias="tool-shapes.svg">icons/tool-shapes.svg</file>
+
+        <file alias="layer-add.svg">icons/layer-add.svg</file>
+        <file alias="layer-delete.svg">icons/layer-delete.svg</file>
+        <file alias="layer-duplicate.svg">icons/layer-duplicate.svg</file>
+        <file alias="layer-merge-down.svg">icons/layer-merge-down.svg</file>
+        <file alias="layer-move-up.svg">icons/layer-move-up.svg</file>
+        <file alias="layer-move-down.svg">icons/layer-move-down.svg</file>
+        <file alias="layer-properties.svg">icons/layer-properties.svg</file>
+    </qresource>
+</RCC>

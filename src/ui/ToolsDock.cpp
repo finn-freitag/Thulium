@@ -2,41 +2,51 @@
 #include <QGridLayout>
 #include <QWidget>
 
+static void initResources() {
+    static bool inited = false;
+    if (!inited) {
+        Q_INIT_RESOURCE(resources);
+        inited = true;
+    }
+}
+
 namespace pdn {
 
 struct ToolLayoutItem {
     ToolType type;
     int row;
     int col;
+    QString iconPath;
     QString iconText;
 };
 
 static const ToolLayoutItem s_toolGrid[] = {
-    { ToolType::RectangleSelect,    0, 0, "[ ]" },
-    { ToolType::MoveSelectedPixels, 0, 1, "<+>" },
-    { ToolType::LassoSelect,        1, 0, " Lasso " },
-    { ToolType::MoveSelection,      1, 1, " MoveS " },
-    { ToolType::EllipseSelect,      2, 0, "( O )" },
-    { ToolType::Zoom,               2, 1, " Zoom " },
-    { ToolType::MagicWand,          3, 0, " Wand " },
-    { ToolType::Pan,                3, 1, " Pan " },
-    { ToolType::PaintBucket,        4, 0, " Bucket" },
-    { ToolType::Paintbrush,         4, 1, " Brush " },
-    { ToolType::Eraser,             5, 0, " Eraser" },
-    { ToolType::Pencil,             5, 1, " Pencil" },
-    { ToolType::ColorPicker,        6, 0, " Picker" },
-    { ToolType::CloneStamp,         6, 1, " Stamp " },
-    { ToolType::Recolor,            7, 0, " Recolor" },
-    { ToolType::Gradient,           7, 1, " Grad  " },
-    { ToolType::Text,               8, 0, " Text  " },
-    { ToolType::LineCurve,          8, 1, " Line  " },
-    { ToolType::Shapes,             9, 0, " Shapes" }
+    { ToolType::RectangleSelect,    0, 0, ":/icons/rectangle-select.svg", "[ ]" },
+    { ToolType::MoveSelectedPixels, 0, 1, ":/icons/move-pixels.svg",       "<+>" },
+    { ToolType::LassoSelect,        1, 0, ":/icons/lasso-select.svg",       "Lasso" },
+    { ToolType::MoveSelection,      1, 1, ":/icons/move-selection.svg",    "MoveS" },
+    { ToolType::EllipseSelect,      2, 0, ":/icons/ellipse-select.svg",    "( O )" },
+    { ToolType::Zoom,               2, 1, ":/icons/zoom.svg",              "Zoom" },
+    { ToolType::MagicWand,          3, 0, ":/icons/magic-wand.svg",        "Wand" },
+    { ToolType::Pan,                3, 1, ":/icons/pan.svg",               "Pan" },
+    { ToolType::PaintBucket,        4, 0, ":/icons/paint-bucket.svg",      "Bucket" },
+    { ToolType::Paintbrush,         4, 1, ":/icons/paint-brush.svg",       "Brush" },
+    { ToolType::Eraser,             5, 0, ":/icons/eraser.svg",            "Eraser" },
+    { ToolType::Pencil,             5, 1, ":/icons/pencil.svg",            "Pencil" },
+    { ToolType::ColorPicker,        6, 0, ":/icons/color-picker.svg",      "Picker" },
+    { ToolType::CloneStamp,         6, 1, ":/icons/clone-stamp.svg",       "Stamp" },
+    { ToolType::Recolor,            7, 0, ":/icons/recolor.svg",           "Recolor" },
+    { ToolType::Gradient,           7, 1, ":/icons/gradient.svg",          "Grad" },
+    { ToolType::Text,               8, 0, ":/icons/text.svg",              "Text" },
+    { ToolType::LineCurve,          8, 1, ":/icons/line-curve.svg",        "Line" },
+    { ToolType::Shapes,             9, 0, ":/icons/shapes.svg",            "Shapes" }
 };
 
 ToolsDock::ToolsDock(ToolManager* toolMgr, QWidget* parent)
     : QDockWidget("Tools", parent), m_toolMgr(toolMgr) {
     setObjectName("ToolsDock");
     setAllowedAreas(Qt::LeftDockWidgetArea | Qt::RightDockWidgetArea);
+    initResources();
     setupUI();
 
     connect(m_toolMgr, &ToolManager::activeToolChanged, this, &ToolsDock::onActiveToolChanged);
@@ -58,10 +68,16 @@ void ToolsDock::setupUI() {
 
         QToolButton* btn = new QToolButton(container);
         btn->setFocusPolicy(Qt::NoFocus);
-        btn->setText(item.iconText.trimmed());
+        QIcon icon(item.iconPath);
+        if (!icon.isNull()) {
+            btn->setIcon(icon);
+            btn->setIconSize(QSize(20, 20));
+        } else {
+            btn->setText(item.iconText.trimmed());
+        }
         btn->setToolTip(QString("%1 (%2)").arg(toolObj->name()).arg(toolObj->shortcut()));
         btn->setCheckable(true);
-        btn->setFixedSize(48, 28);
+        btn->setFixedSize(36, 30);
 
         layout->addWidget(btn, item.row, item.col);
         m_buttonGroup->addButton(btn, static_cast<int>(item.type));
@@ -73,7 +89,7 @@ void ToolsDock::setupUI() {
     layout->setRowStretch(10, 1);
     container->setLayout(layout);
     setWidget(container);
-    setFixedWidth(112);
+    setFixedWidth(90);
 }
 
 void ToolsDock::onToolButtonClicked(int id) {

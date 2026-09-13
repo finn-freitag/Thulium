@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24">
+  <!-- Wooden knob handle -->
+  <circle cx="12" cy="5" r="3.5" fill="#B45309" stroke="#78350F" stroke-width="0.8"/>
+  <ellipse cx="11.5" cy="4" rx="2" ry="1.2" fill="#D97706"/>
+  <!-- Narrow stem -->
+  <path d="M10.5 8.5 H13.5 V12 L11 13 L10.5 8.5 Z" fill="#92400E" stroke="#78350F" stroke-width="0.8"/>
+  <!-- Flared metal/wood collar -->
+  <path d="M9 13 H15 L18 17 H6 Z" fill="#64748B" stroke="#334155" stroke-width="0.8"/>
+  <!-- Stamp rubber base block -->
+  <rect x="5" y="17" width="14" height="3" rx="0.5" fill="#334155" stroke="#1E293B" stroke-width="0.8"/>
+  <!-- Rubber pad ink surface -->
+  <line x1="6" y1="20.5" x2="18" y2="20.5" stroke="#0284C7" stroke-width="1.2" stroke-linecap="round"/>
+</svg>

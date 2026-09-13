@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24">
+  <!-- Rubber bulb -->
+  <path d="M17 7 L19 5 C21 3 22 4 21 6 L19 8 Z" fill="#334155" stroke="#1E293B" stroke-width="1"/>
+  <ellipse cx="19.5" cy="4.5" rx="2.5" ry="3" transform="rotate(45 19.5 4.5)" fill="#1E293B"/>
+  <!-- Glass tube -->
+  <path d="M10 14 L17 7 L19 9 L12 16 Z" fill="#E2E8F0" fill-opacity="0.6" stroke="#475569" stroke-width="1"/>
+  <!-- Liquid in tube -->
+  <path d="M7 17 L10 14 L12 16 L9 19 Z" fill="#EF4444"/>
+  <!-- Tip nozzle -->
+  <path d="M7 17 L4 20 L9 19 Z" fill="#CBD5E1" stroke="#475569" stroke-width="0.8"/>
+  <!-- Droplet falling -->
+  <path d="M3 21 C2.5 21.5 2.5 22.5 3 23 C3.5 23.5 4.5 23.5 5 23 C4.5 22 3.5 21.5 3 21 Z" fill="#EF4444"/>
+</svg>

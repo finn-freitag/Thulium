@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24">
+  <!-- Wooden handle -->
+  <path d="M15 9 L21.5 2.5 C22.5 1.5 23.5 2.5 22.5 3.5 L16 10 Z" fill="#92400E" stroke="#78350F" stroke-width="0.8"/>
+  <!-- Silver ferrule -->
+  <path d="M12 12 L16 8 L14 6 L10 10 Z" fill="#CBD5E1" stroke="#475569" stroke-width="0.8"/>
+  <!-- Dark bristles -->
+  <path d="M10 10 L12 12 C11 15 8 18 4 20 C2 21 3 19 4 17 C6 13 9 11 10 10 Z" fill="#334155" stroke="#1E293B" stroke-width="0.8"/>
+  <!-- Wet paint on tip -->
+  <path d="M4 20 C2 21 3 19 4 17 C5 16 6 17 6 18 C5.5 19.5 4.8 20 4 20 Z" fill="#0284C7"/>
+</svg>

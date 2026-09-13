@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24">
+  <!-- Pencil yellow shaft -->
+  <path d="M7 17 L17 7 L19 9 L9 19 Z" fill="#F59E0B" stroke="#B45309" stroke-width="0.8"/>
+  <path d="M8 18 L18 8 L19 9 L9 19 Z" fill="#D97706"/>
+  <!-- Silver ferrule -->
+  <path d="M17 7 L19 5 L21 7 L19 9 Z" fill="#CBD5E1" stroke="#64748B" stroke-width="0.8"/>
+  <!-- Pink eraser -->
+  <path d="M19 5 L20.5 3.5 C21.5 2.5 22.5 3.5 21.5 4.5 L21 7 Z" fill="#F472B6" stroke="#DB2777" stroke-width="0.8"/>
+  <!-- Sharpened wood cone -->
+  <path d="M7 17 L4 20 L9 19 Z" fill="#FEF08A" stroke="#CA8A04" stroke-width="0.8"/>
+  <!-- Graphite lead tip -->
+  <path d="M4 20 L2.5 21.5 L5.5 21 Z" fill="#1E293B"/>
+</svg>

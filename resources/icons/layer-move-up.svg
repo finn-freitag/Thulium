@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" width="16" height="16">
+  <!-- Bold upward arrow -->
+  <path d="M8 2 L3.5 7 H6.5 V11 H9.5 V7 H12.5 Z" fill="#0284C7" stroke="#0369A1" stroke-width="0.8" stroke-linejoin="round"/>
+  <!-- Base layer line -->
+  <line x1="2.5" y1="14" x2="13.5" y2="14" stroke="#64748B" stroke-width="1.8" stroke-linecap="round"/>
+</svg>

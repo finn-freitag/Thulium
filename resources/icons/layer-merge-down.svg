@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" width="16" height="16">
+  <!-- Top layer sheet outline -->
+  <rect x="2" y="1.5" width="12" height="3" rx="0.8" fill="#F1F5F9" stroke="#64748B" stroke-width="1"/>
+  <!-- Downward merging arrow in middle -->
+  <path d="M8 5 V10.5 M5.5 8.5 L8 11 L10.5 8.5" fill="none" stroke="#0284C7" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+  <!-- Bottom layer sheet outline -->
+  <rect x="2" y="11.5" width="12" height="3" rx="0.8" fill="#E2E8F0" stroke="#0284C7" stroke-width="1.2"/>
+</svg>

@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24">
+  <!-- Dashed boundary outline -->
+  <rect x="5" y="5" width="14" height="14" fill="none" stroke="#475569" stroke-width="1.2" stroke-dasharray="2 2"/>
+  <!-- 4-way direction arrows (white filled with dark border) -->
+  <path d="M12 2 L15.5 5.5 H13 V9.5 H17 V7 L20.5 10.5 L17 14 V11.5 H13 V15.5 H15.5 L12 19 L8.5 15.5 H11 V11.5 H7 V14 L3.5 10.5 L7 7 V9.5 H11 V5.5 H8.5 Z" fill="#F8FAFC" stroke="#334155" stroke-width="1.2" stroke-linejoin="round"/>
+</svg>

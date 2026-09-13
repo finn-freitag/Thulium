@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" width="16" height="16">
+  <!-- Layer sheet -->
+  <rect x="1.5" y="1.5" width="10" height="12" rx="1" fill="#F8FAFC" stroke="#64748B" stroke-width="1.1"/>
+  <line x1="3.5" y1="4.5" x2="7" y2="4.5" stroke="#CBD5E1" stroke-width="1"/>
+  <line x1="3.5" y1="7.5" x2="6" y2="7.5" stroke="#CBD5E1" stroke-width="1"/>
+  <!-- Gear badge on lower-right -->
+  <circle cx="11.5" cy="11.5" r="4" fill="#F1F5F9" stroke="#334155" stroke-width="0.8"/>
+  <!-- Gear teeth / hub -->
+  <circle cx="11.5" cy="11.5" r="1.5" fill="#334155"/>
+  <path d="M11.5 7 V8.2 M11.5 14.8 V16 M7 11.5 H8.2 M14.8 11.5 H16 M8.3 8.3 L9.2 9.2 M13.8 13.8 L14.7 14.7 M8.3 14.7 L9.2 13.8 M13.8 9.2 L14.7 8.3" stroke="#334155" stroke-width="1.2" stroke-linecap="round"/>
+</svg>

@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24">
+  <defs>
+    <linearGradient id="gradTool" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#4F46E5"/>
+      <stop offset="35%" stop-color="#06B6D4"/>
+      <stop offset="70%" stop-color="#10B981"/>
+      <stop offset="100%" stop-color="#FBBF24"/>
+    </linearGradient>
+  </defs>
+  <rect x="3" y="4" width="18" height="16" rx="2" fill="url(#gradTool)" stroke="#334155" stroke-width="1.2"/>
+  <!-- Diagonal guide line with endpoint handles -->
+  <line x1="5" y1="6" x2="19" y2="18" stroke="#FFFFFF" stroke-width="1.2" stroke-dasharray="2 2"/>
+  <circle cx="5" cy="6" r="2" fill="#FFFFFF" stroke="#334155" stroke-width="1"/>
+  <circle cx="19" cy="18" r="2" fill="#FFFFFF" stroke="#334155" stroke-width="1"/>
+</svg>
