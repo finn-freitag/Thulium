@@ -112,9 +112,32 @@ private slots:
     void onMergeDown();
     void onLayerProperties();
 
-    // Adjustments & Effects
+    // Adjustments
+    void onAutoLevel();
+    void onBlackAndWhite();
     void onBrightnessContrast();
+    void onHueSaturation();
+    void onInvertColors();
+    void onInvertAlpha();
+    void onPosterize();
+    void onSepia();
+    void onTemperatureTint();
+
+    // Effects
+    void onRepeatLastEffect();
+    void onOilPainting();
     void onGaussianBlur();
+    void onMotionBlur();
+    void onRadialBlur();
+    void onPixelate();
+    void onTwist();
+    void onAddNoise();
+    void onMedian();
+    void onGlow();
+    void onSharpen();
+    void onVignette();
+    void onEdgeDetect();
+    void onEmboss();
 
     // Window
     void onResetWindowLocations();
@@ -158,6 +181,10 @@ private:
 
     QMenu* m_windowMenu = nullptr;
     QList<QAction*> m_windowDocActions;
+
+    void runEffect(const std::shared_ptr<IEffect>& effect);
+    QAction* m_repeatEffectAct = nullptr;
+    std::shared_ptr<IEffect> m_lastEffect;
 
     static QPoint s_lastCopiedPos;
     static QSize s_lastCopiedSize;

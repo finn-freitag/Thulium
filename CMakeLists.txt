@@ -69,10 +69,24 @@ set(PDN_SOURCES
     src/tools/ToolManager.cpp
 
     src/effects/IEffect.h
+    src/effects/EffectDialog.h
+    src/effects/EffectDialog.cpp
     src/effects/BrightnessContrast.h
     src/effects/BrightnessContrast.cpp
     src/effects/GaussianBlur.h
     src/effects/GaussianBlur.cpp
+    src/effects/Adjustments.h
+    src/effects/Adjustments.cpp
+    src/effects/BlurEffects.h
+    src/effects/BlurEffects.cpp
+    src/effects/DistortEffects.h
+    src/effects/DistortEffects.cpp
+    src/effects/NoiseEffects.h
+    src/effects/NoiseEffects.cpp
+    src/effects/PhotoEffects.h
+    src/effects/PhotoEffects.cpp
+    src/effects/StylizeEffects.h
+    src/effects/StylizeEffects.cpp
     src/effects/PluginManager.h
     src/effects/PluginManager.cpp
 

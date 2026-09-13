@@ -3,6 +3,12 @@
 #include "Dialogs.h"
 #include "../effects/BrightnessContrast.h"
 #include "../effects/GaussianBlur.h"
+#include "../effects/Adjustments.h"
+#include "../effects/BlurEffects.h"
+#include "../effects/DistortEffects.h"
+#include "../effects/NoiseEffects.h"
+#include "../effects/PhotoEffects.h"
+#include "../effects/StylizeEffects.h"
 #include "../core/History.h"
 #include "../tools/TextTool.h"
 #include "../tools/ShapeTools.h"
@@ -467,12 +473,52 @@ void MainWindow::setupMenus() {
 
     // --- Adjustments Menu ---
     QMenu* adjMenu = mb->addMenu("&Adjustments");
+    adjMenu->addAction("&Auto-Level", this, &MainWindow::onAutoLevel, QKeySequence("Ctrl+Shift+L"));
+    adjMenu->addAction("&Black and White", this, &MainWindow::onBlackAndWhite, QKeySequence("Ctrl+Shift+G"));
     adjMenu->addAction("&Brightness / Contrast...", this, &MainWindow::onBrightnessContrast, QKeySequence("Ctrl+Shift+T"));
+    adjMenu->addAction("&Hue / Saturation...", this, &MainWindow::onHueSaturation, QKeySequence("Ctrl+Shift+U"));
+    adjMenu->addAction("&Invert Colors", this, &MainWindow::onInvertColors, QKeySequence("Ctrl+Shift+I"));
+    adjMenu->addAction("Invert &Alpha", this, &MainWindow::onInvertAlpha);
+    adjMenu->addAction("&Posterize...", this, &MainWindow::onPosterize, QKeySequence("Ctrl+Shift+P"));
+    adjMenu->addAction("&Sepia", this, &MainWindow::onSepia);
+    adjMenu->addAction("&Temperature / Tint...", this, &MainWindow::onTemperatureTint);
 
     // --- Effects Menu ---
     QMenu* fxMenu = mb->addMenu("&Effects");
+    m_repeatEffectAct = fxMenu->addAction("&Repeat Effect", this, &MainWindow::onRepeatLastEffect, QKeySequence("Ctrl+F"));
+    m_repeatEffectAct->setEnabled(false);
+    fxMenu->addSeparator();
+
+    // Artistic
+    QMenu* artisticMenu = fxMenu->addMenu("&Artistic");
+    artisticMenu->addAction("&Oil Painting...", this, &MainWindow::onOilPainting);
+
+    // Blurs
     QMenu* blursMenu = fxMenu->addMenu("&Blurs");
     blursMenu->addAction("&Gaussian Blur...", this, &MainWindow::onGaussianBlur);
+    blursMenu->addAction("&Motion Blur...", this, &MainWindow::onMotionBlur);
+    blursMenu->addAction("&Radial Blur...", this, &MainWindow::onRadialBlur);
+
+    // Distort
+    QMenu* distortMenu = fxMenu->addMenu("&Distort");
+    distortMenu->addAction("&Pixelate...", this, &MainWindow::onPixelate);
+    distortMenu->addAction("&Twist...", this, &MainWindow::onTwist);
+
+    // Noise
+    QMenu* noiseMenu = fxMenu->addMenu("&Noise");
+    noiseMenu->addAction("&Add Noise...", this, &MainWindow::onAddNoise);
+    noiseMenu->addAction("&Median...", this, &MainWindow::onMedian);
+
+    // Photo
+    QMenu* photoMenu = fxMenu->addMenu("&Photo");
+    photoMenu->addAction("&Glow...", this, &MainWindow::onGlow);
+    photoMenu->addAction("&Sharpen...", this, &MainWindow::onSharpen);
+    photoMenu->addAction("&Vignette...", this, &MainWindow::onVignette);
+
+    // Stylize
+    QMenu* stylizeMenu = fxMenu->addMenu("&Stylize");
+    stylizeMenu->addAction("&Edge Detect...", this, &MainWindow::onEdgeDetect);
+    stylizeMenu->addAction("&Emboss...", this, &MainWindow::onEmboss);
 
     // --- Window Menu ---
     m_windowMenu = mb->addMenu("&Window");
@@ -1105,17 +1151,51 @@ void MainWindow::onLayerProperties() {
     }
 }
 
-void MainWindow::onBrightnessContrast() {
-    if (!m_doc) return;
-    BrightnessContrastEffect fx;
-    fx.showDialog(this, m_doc.get());
+void MainWindow::runEffect(const std::shared_ptr<IEffect>& effect) {
+    if (!m_doc || !effect) return;
+    if (effect->showDialog(this, m_doc.get())) {
+        m_lastEffect = effect;
+        if (m_repeatEffectAct) {
+            m_repeatEffectAct->setEnabled(true);
+            m_repeatEffectAct->setText("&Repeat " + effect->name());
+        }
+    }
 }
 
-void MainWindow::onGaussianBlur() {
-    if (!m_doc) return;
-    GaussianBlurEffect fx;
-    fx.showDialog(this, m_doc.get());
+void MainWindow::onRepeatLastEffect() {
+    if (!m_doc || !m_doc->activeLayer() || !m_lastEffect) return;
+    int layerIdx = m_doc->activeLayerIndex();
+    QImage original = m_doc->activeLayer()->image().copy();
+    QImage copy = original.copy();
+    m_lastEffect->apply(copy, m_doc->selection());
+    m_doc->activeLayer()->setImage(copy);
+    m_doc->undoStack()->push(new LayerBitmapUndoCommand(m_doc.get(), layerIdx, original, m_lastEffect->name()));
+    emit m_doc->documentChanged();
 }
+
+void MainWindow::onAutoLevel() { runEffect(std::make_shared<AutoLevelEffect>()); }
+void MainWindow::onBlackAndWhite() { runEffect(std::make_shared<BlackAndWhiteEffect>()); }
+void MainWindow::onBrightnessContrast() { runEffect(std::make_shared<BrightnessContrastEffect>()); }
+void MainWindow::onHueSaturation() { runEffect(std::make_shared<HueSaturationEffect>()); }
+void MainWindow::onInvertColors() { runEffect(std::make_shared<InvertColorsEffect>()); }
+void MainWindow::onInvertAlpha() { runEffect(std::make_shared<InvertAlphaEffect>()); }
+void MainWindow::onPosterize() { runEffect(std::make_shared<PosterizeEffect>()); }
+void MainWindow::onSepia() { runEffect(std::make_shared<SepiaEffect>()); }
+void MainWindow::onTemperatureTint() { runEffect(std::make_shared<TemperatureTintEffect>()); }
+
+void MainWindow::onOilPainting() { runEffect(std::make_shared<OilPaintingEffect>()); }
+void MainWindow::onGaussianBlur() { runEffect(std::make_shared<GaussianBlurEffect>()); }
+void MainWindow::onMotionBlur() { runEffect(std::make_shared<MotionBlurEffect>()); }
+void MainWindow::onRadialBlur() { runEffect(std::make_shared<RadialBlurEffect>()); }
+void MainWindow::onPixelate() { runEffect(std::make_shared<PixelateEffect>()); }
+void MainWindow::onTwist() { runEffect(std::make_shared<TwistEffect>()); }
+void MainWindow::onAddNoise() { runEffect(std::make_shared<AddNoiseEffect>()); }
+void MainWindow::onMedian() { runEffect(std::make_shared<MedianEffect>()); }
+void MainWindow::onGlow() { runEffect(std::make_shared<GlowEffect>()); }
+void MainWindow::onSharpen() { runEffect(std::make_shared<SharpenEffect>()); }
+void MainWindow::onVignette() { runEffect(std::make_shared<VignetteEffect>()); }
+void MainWindow::onEdgeDetect() { runEffect(std::make_shared<EdgeDetectEffect>()); }
+void MainWindow::onEmboss() { runEffect(std::make_shared<EmbossEffect>()); }
 
 void MainWindow::onResetWindowLocations() {
     m_toolsDock->setVisible(true);
@@ -1137,8 +1217,9 @@ void MainWindow::onAbout() {
         "<li>Paint.NET Color Picker with HSV Wheel & Swatches</li>"
         "<li>Multi-layer editing with all 14 blend modes</li>"
         "<li>Undo / Redo History stack</li>"
-        "<li>Adjustments: Brightness / Contrast</li>"
-        "<li>Effects: Gaussian Blur</li>"
+        "<li>Adjustments: Auto-Level, Black & White, Brightness/Contrast, Hue/Saturation, Invert Colors, Invert Alpha, Posterize, Sepia, Temperature/Tint</li>"
+        "<li>Effects: Oil Painting, Gaussian/Motion/Radial Blur, Pixelate, Twist, Add Noise, Median, Glow, Sharpen, Vignette, Edge Detect, Emboss</li>"
+        "<li>Repeat Last Effect (Ctrl+F)</li>"
         "<li>Vulkan GPU hardware rendering</li>"
         "<li>Plugin-ready extensible architecture</li>"
         "</ul>"
