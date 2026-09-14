@@ -608,7 +608,28 @@ int main(int argc, char* argv[]) {
         QApplication::sendEvent(testBtn, &keyB);
         assert(win.toolManager()->activeToolType() == pdn::ToolType::Paintbrush);
 
-        std::cout << "  Passed: eventFilter dispatches keybindings window-wide across all docks and child widgets, and isolates other windows!" << std::endl;
+        // 6. Verify typing inside ToolOptionsBar brush width spinbox works and does NOT trigger shortcuts
+        QSpinBox* brushSpin = win.findChild<QSpinBox*>();
+        assert(brushSpin != nullptr);
+        assert(brushSpin->focusPolicy() != Qt::NoFocus);
+        brushSpin->setFocus();
+
+        // Initially tool is Paintbrush, switch to Pencil
+        win.toolManager()->setActiveTool(pdn::ToolType::Pencil);
+        assert(win.toolManager()->activeToolType() == pdn::ToolType::Pencil);
+
+        // Sending key 'B' while brushSpin has focus should NOT switch tool to Paintbrush
+        QWidget* spinFocus = QApplication::focusWidget();
+        if (!spinFocus) spinFocus = brushSpin;
+        QApplication::sendEvent(spinFocus, &keyB);
+        assert(win.toolManager()->activeToolType() == pdn::ToolType::Pencil);
+
+        // Value changes in brushSpin sync to toolManager context
+        brushSpin->setValue(25);
+        assert(brushSpin->value() == 25);
+        assert(win.toolManager()->context().brushWidth == 25);
+
+        std::cout << "  Passed: eventFilter dispatches keybindings window-wide across all docks and child widgets, isolates other windows, and allows typing in brush width spinbox!" << std::endl;
     }
 
     // Test 13: Copy/Cut/Paste behavior, selection persistence & floating selection movement

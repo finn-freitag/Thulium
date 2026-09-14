@@ -15,11 +15,13 @@ void ToolOptionsBar::setupWidgets() {
     // 1. Brush Width
     m_brushWidthLabel = new QLabel(" Width: ", this);
     m_brushWidthSpin = new QSpinBox(this);
-    m_brushWidthSpin->setFocusPolicy(Qt::NoFocus);
     m_brushWidthSpin->setRange(1, 500);
     m_brushWidthSpin->setValue(m_toolMgr->context().brushWidth);
     connect(m_brushWidthSpin, QOverload<int>::of(&QSpinBox::valueChanged), this, [this](int val) {
         m_toolMgr->context().brushWidth = val;
+    });
+    connect(m_brushWidthSpin, &QSpinBox::editingFinished, this, [this]() {
+        m_brushWidthSpin->clearFocus();
     });
 
     // 2. Antialias
@@ -97,22 +99,25 @@ void ToolOptionsBar::setupWidgets() {
 
     // 7. Text Options
     m_fontCombo = new QFontComboBox(this);
-    m_fontCombo->setFocusPolicy(Qt::NoFocus);
     m_fontCombo->setCurrentFont(m_toolMgr->context().font);
     connect(m_fontCombo, &QFontComboBox::currentFontChanged, this, [this](const QFont& f) {
         m_toolMgr->context().font = f;
     });
 
     m_fontSizeCombo = new QComboBox(this);
-    m_fontSizeCombo->setFocusPolicy(Qt::NoFocus);
+    m_fontSizeCombo->setEditable(true);
     const int sizes[] = {8, 9, 10, 11, 12, 14, 16, 18, 20, 24, 28, 32, 36, 48, 72};
     for (int s : sizes) m_fontSizeCombo->addItem(QString::number(s), s);
     m_fontSizeCombo->setCurrentText("12");
-    connect(m_fontSizeCombo, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [this](int idx) {
-        int sz = m_fontSizeCombo->itemData(idx).toInt();
-        m_toolMgr->context().fontSize = sz;
-        m_toolMgr->context().font.setPointSize(sz);
-    });
+    auto updateFontSize = [this](const QString& text) {
+        bool ok = false;
+        int sz = text.toInt(&ok);
+        if (ok && sz > 0 && sz <= 1000) {
+            m_toolMgr->context().fontSize = sz;
+            m_toolMgr->context().font.setPointSize(sz);
+        }
+    };
+    connect(m_fontSizeCombo, &QComboBox::currentTextChanged, this, updateFontSize);
 
     m_boldBtn = new QToolButton(this);
     m_boldBtn->setFocusPolicy(Qt::NoFocus);

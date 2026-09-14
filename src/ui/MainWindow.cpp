@@ -1488,14 +1488,19 @@ bool MainWindow::eventFilter(QObject* watched, QEvent* event) {
         QWidget* fw = QApplication::focusWidget();
         auto isTextInput = [](QObject* obj) -> bool {
             if (!obj) return false;
-            if (qobject_cast<QLineEdit*>(obj) ||
-                qobject_cast<QTextEdit*>(obj) ||
-                qobject_cast<QPlainTextEdit*>(obj) ||
-                qobject_cast<QAbstractSpinBox*>(obj)) {
-                return true;
-            }
-            if (auto cb = qobject_cast<QComboBox*>(obj)) {
-                if (cb->isEditable()) return true;
+            for (QObject* cur = obj; cur != nullptr; cur = cur->parent()) {
+                if (qobject_cast<QLineEdit*>(cur) ||
+                    qobject_cast<QTextEdit*>(cur) ||
+                    qobject_cast<QPlainTextEdit*>(cur) ||
+                    qobject_cast<QAbstractSpinBox*>(cur)) {
+                    return true;
+                }
+                if (auto cb = qobject_cast<QComboBox*>(cur)) {
+                    if (cb->isEditable()) return true;
+                }
+                if (qobject_cast<QWidget*>(cur) && static_cast<QWidget*>(cur)->isWindow()) {
+                    break;
+                }
             }
             return false;
         };
@@ -1558,14 +1563,19 @@ void MainWindow::keyPressEvent(QKeyEvent* event) {
     QWidget* fw = focusWidget();
     auto isTextInput = [](QObject* obj) -> bool {
         if (!obj) return false;
-        if (qobject_cast<QLineEdit*>(obj) ||
-            qobject_cast<QTextEdit*>(obj) ||
-            qobject_cast<QPlainTextEdit*>(obj) ||
-            qobject_cast<QAbstractSpinBox*>(obj)) {
-            return true;
-        }
-        if (auto cb = qobject_cast<QComboBox*>(obj)) {
-            if (cb->isEditable()) return true;
+        for (QObject* cur = obj; cur != nullptr; cur = cur->parent()) {
+            if (qobject_cast<QLineEdit*>(cur) ||
+                qobject_cast<QTextEdit*>(cur) ||
+                qobject_cast<QPlainTextEdit*>(cur) ||
+                qobject_cast<QAbstractSpinBox*>(cur)) {
+                return true;
+            }
+            if (auto cb = qobject_cast<QComboBox*>(cur)) {
+                if (cb->isEditable()) return true;
+            }
+            if (qobject_cast<QWidget*>(cur) && static_cast<QWidget*>(cur)->isWindow()) {
+                break;
+            }
         }
         return false;
     };

@@ -19,6 +19,8 @@ public:
 public slots:
     void updateForTool(ToolType type);
 
+    QSpinBox* brushWidthSpin() const { return m_brushWidthSpin; }
+
 private:
     void setupWidgets();
 
