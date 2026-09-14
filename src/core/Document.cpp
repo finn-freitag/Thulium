@@ -231,9 +231,36 @@ bool Document::mergeLayerDown(int index, bool recordUndo) {
     return true;
 }
 
+FloatingSelectionState Document::floatingSelectionState() const {
+    FloatingSelectionState state;
+    state.hasFloating = m_hasFloatingSelection;
+    state.image = m_floatingImage;
+    state.originalImage = m_originalFloatingImage;
+    state.transform = m_floatingTransform;
+    state.offset = m_floatingOffset;
+    state.snapshot = m_floatingSnapshot;
+    state.layerIndex = m_floatingLayerIndex;
+    state.isLifted = m_floatingIsLifted;
+    state.actionName = m_floatingActionName;
+    return state;
+}
+
+void Document::setFloatingSelectionState(const FloatingSelectionState& state) {
+    m_hasFloatingSelection = state.hasFloating;
+    m_floatingImage = state.image;
+    m_originalFloatingImage = state.originalImage;
+    m_floatingTransform = state.transform;
+    m_floatingOffset = state.offset;
+    m_floatingSnapshot = state.snapshot;
+    m_floatingLayerIndex = state.layerIndex;
+    m_floatingIsLifted = state.isLifted;
+    m_floatingActionName = state.actionName;
+    emit documentChanged();
+}
+
 void Document::createFloatingSelection(const QImage& image, const QPointF& offset, bool isLifted, const QString& actionName) {
     if (m_hasFloatingSelection) {
-        bakeFloatingSelection();
+        bakeFloatingSelection(false);
     }
     auto layer = activeLayer();
     if (!layer) return;
@@ -267,19 +294,13 @@ void Document::liftSelectionToFloating() {
     m_floatingImage = QImage(srcRect.size(), QImage::Format_ARGB32);
     m_floatingImage.fill(Qt::transparent);
 
-    // Copy selected pixels to floating image
+    // Copy selected pixels to floating image, strictly clipped to the selection outline
     QPainter pFloat(&m_floatingImage);
+    pFloat.setClipPath(m_selection.path().translated(-srcRect.x(), -srcRect.y()));
     pFloat.drawImage(-srcRect.x(), -srcRect.y(), layer->image());
     pFloat.end();
 
-    // Mask floating image with selection
-    QPainter pMask(&m_floatingImage);
-    pMask.setCompositionMode(QPainter::CompositionMode_DestinationIn);
-    pMask.translate(-srcRect.x(), -srcRect.y());
-    pMask.fillPath(m_selection.path(), Qt::black);
-    pMask.end();
-
-    // Clear the selected area on the layer
+    // Clear only the selected area on the layer
     QPainter pLayer(&layer->image());
     pLayer.setCompositionMode(QPainter::CompositionMode_Clear);
     pLayer.fillPath(m_selection.path(), Qt::transparent);
@@ -309,29 +330,52 @@ void Document::setFloatingTransform(const QTransform& transform) {
     emit documentChanged();
 }
 
-void Document::bakeFloatingSelection() {
+void Document::bakeFloatingSelection(bool recordUndo, const QString& actionName) {
     if (!m_hasFloatingSelection) return;
     auto layer = this->layer(m_floatingLayerIndex);
-    if (layer) {
-        const QImage& srcImg = !m_originalFloatingImage.isNull() ? m_originalFloatingImage : m_floatingImage;
-        if (!srcImg.isNull()) {
-            QPainter p(&layer->image());
-            p.setRenderHint(QPainter::SmoothPixmapTransform, true);
-            p.setRenderHint(QPainter::Antialiasing, true);
-            p.setTransform(m_floatingTransform);
-            p.drawImage(0, 0, srcImg);
-            p.end();
-        }
-
-        QString act = m_floatingActionName.isEmpty() ? (m_floatingIsLifted ? "Move Pixels" : "Paste") : m_floatingActionName;
-        m_undoStack.push(new LayerBitmapUndoCommand(this, m_floatingLayerIndex, m_floatingSnapshot, act));
+    if (!layer) {
+        m_hasFloatingSelection = false;
+        m_floatingImage = QImage();
+        m_originalFloatingImage = QImage();
+        m_floatingTransform = QTransform();
+        m_floatingIsLifted = false;
+        emit documentChanged();
+        return;
     }
+
+    QImage preBakeImage = layer->image().copy();
+    const QImage& srcImg = !m_originalFloatingImage.isNull() ? m_originalFloatingImage : m_floatingImage;
+    if (!srcImg.isNull()) {
+        QPainter p(&layer->image());
+        p.setRenderHint(QPainter::SmoothPixmapTransform, true);
+        p.setRenderHint(QPainter::Antialiasing, true);
+        p.setTransform(m_floatingTransform);
+        p.drawImage(0, 0, srcImg);
+        p.end();
+    }
+    QImage postBakeImage = layer->image().copy();
+
+    FloatingSelectionState state = floatingSelectionState();
+    QPainterPath preSelPath = m_selection.path();
 
     m_hasFloatingSelection = false;
     m_floatingImage = QImage();
     m_originalFloatingImage = QImage();
     m_floatingTransform = QTransform();
     m_floatingIsLifted = false;
+
+    QString act = actionName.isEmpty() ? "Deselect" : actionName;
+    QPainterPath postSelPath = preSelPath;
+    if (act == "Deselect") {
+        m_selection.clear();
+        postSelPath = QPainterPath();
+        emit selectionChanged();
+    }
+
+    if (recordUndo) {
+        m_undoStack.push(new BakeFloatingUndoCommand(this, m_floatingLayerIndex, preBakeImage, postBakeImage, state, preSelPath, postSelPath, act));
+    }
+
     emit documentChanged();
 }
 
@@ -353,10 +397,6 @@ void Document::cancelFloatingSelection() {
 
 void Document::discardFloatingSelection() {
     if (!m_hasFloatingSelection) return;
-    if (m_floatingIsLifted) {
-        QString act = m_floatingActionName.isEmpty() ? "Cut" : m_floatingActionName;
-        m_undoStack.push(new LayerBitmapUndoCommand(this, m_floatingLayerIndex, m_floatingSnapshot, act));
-    }
     m_hasFloatingSelection = false;
     m_floatingImage = QImage();
     m_originalFloatingImage = QImage();
@@ -367,7 +407,8 @@ void Document::discardFloatingSelection() {
 
 void Document::clearSelection() {
     if (m_hasFloatingSelection) {
-        bakeFloatingSelection();
+        bakeFloatingSelection(true, "Deselect");
+        return;
     }
     m_selection.clear();
     emit selectionChanged();

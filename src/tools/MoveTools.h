@@ -45,13 +45,13 @@ public:
     void keyPress(QKeyEvent* event, Document* doc, ToolContext& ctx) override;
     void drawOverlay(QPainter& painter, const RenderOptions& opts) override;
 
-    void nudge(Document* doc, qreal dx, qreal dy);
+    virtual void nudge(Document* doc, qreal dx, qreal dy);
 
     TransformMode mode() const { return m_mode; }
     void setMode(TransformMode m) { m_mode = m; }
     const QTransform& transform() const { return m_transform; }
     std::array<QPointF, 4> currentQuad() const;
-    void initSessionFromDoc(Document* doc);
+    virtual void initSessionFromDoc(Document* doc);
 
 protected:
     virtual void onSessionStarted(Document* doc) {}
@@ -85,6 +85,14 @@ protected:
     bool m_isDrag = false;
     QTransform m_initialTransform;
     std::array<QPointF, 4> m_initialQuad;
+    QPainterPath m_initialSelectionPath;
+    bool m_needsLiftOnDrag = false;
+    bool m_wasLiftedInThisDrag = false;
+    QImage m_preLiftImage;
+    QImage m_postLiftImage;
+    QImage m_liftedFloatingImage;
+    int m_liftedLayerIndex = 0;
+
     qreal m_startAngleRad = 0.0;
     qreal m_prevAngleRad = 0.0;
     qreal m_accumulatedAngleDeg = 0.0;
@@ -92,6 +100,7 @@ protected:
     QPointF m_rotateCenter;
 
     RenderOptions m_lastRenderOpts;
+    Document* m_currentDoc = nullptr;
     static QCursor s_rotateCursor;
     static bool s_rotateCursorInitialized;
     static void initRotateCursor();
@@ -103,6 +112,9 @@ public:
     QString name() const override { return "Move Selection"; }
     QString toolTip() const override { return "Move Selection (M)"; }
     QString shortcut() const override { return "M"; }
+
+    void nudge(Document* doc, qreal dx, qreal dy) override;
+    void initSessionFromDoc(Document* doc) override;
 
 protected:
     void onSessionStarted(Document* doc) override;
@@ -122,6 +134,8 @@ public:
     QString shortcut() const override { return "M"; }
 
     void commit(Document* doc);
+    void nudge(Document* doc, qreal dx, qreal dy) override;
+    void initSessionFromDoc(Document* doc) override;
 
 protected:
     void onSessionStarted(Document* doc) override;

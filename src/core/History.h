@@ -180,4 +180,117 @@ private:
     bool m_firstRedo = true;
 };
 
+class PasteFloatingUndoCommand : public QUndoCommand {
+public:
+    PasteFloatingUndoCommand(Document* doc,
+                             const QImage& pastedImage,
+                             const QPoint& pastePos,
+                             int layerIndex,
+                             const QRegion& oldSelectionRegion,
+                             const QString& text = "Paste");
+
+    void undo() override;
+    void redo() override;
+
+private:
+    Document* m_doc;
+    QImage m_pastedImage;
+    QPoint m_pastePos;
+    int m_layerIndex;
+    QRegion m_oldSelectionRegion;
+    bool m_firstRedo = true;
+};
+
+class LiftFloatingUndoCommand : public QUndoCommand {
+public:
+    LiftFloatingUndoCommand(Document* doc,
+                            int layerIndex,
+                            const QImage& preLiftLayerImage,
+                            const QImage& postLiftLayerImage,
+                            const QImage& floatingImage,
+                            const QTransform& initialTransform,
+                            const QTransform& newTransform,
+                            const QPainterPath& initialSelectionPath,
+                            const QPainterPath& newSelectionPath,
+                            const QString& text = "Move Pixels");
+
+    void undo() override;
+    void redo() override;
+
+private:
+    Document* m_doc;
+    int m_layerIndex;
+    QImage m_preLiftLayerImage;
+    QImage m_postLiftLayerImage;
+    QImage m_floatingImage;
+    QTransform m_initialTransform;
+    QTransform m_newTransform;
+    QPainterPath m_initialSelectionPath;
+    QPainterPath m_newSelectionPath;
+    bool m_firstRedo = true;
+};
+
+class TransformFloatingUndoCommand : public QUndoCommand {
+public:
+    TransformFloatingUndoCommand(Document* doc,
+                                 const QTransform& oldTransform,
+                                 const QTransform& newTransform,
+                                 const QPainterPath& oldPath,
+                                 const QPainterPath& newPath,
+                                 const QString& text = "Move Pixels");
+
+    void undo() override;
+    void redo() override;
+
+private:
+    Document* m_doc;
+    QTransform m_oldTransform;
+    QTransform m_newTransform;
+    QPainterPath m_oldPath;
+    QPainterPath m_newPath;
+    bool m_firstRedo = true;
+};
+
+class TransformSelectionUndoCommand : public QUndoCommand {
+public:
+    TransformSelectionUndoCommand(Document* doc,
+                                  const QPainterPath& oldPath,
+                                  const QPainterPath& newPath,
+                                  const QString& text = "Move Selection");
+
+    void undo() override;
+    void redo() override;
+
+private:
+    Document* m_doc;
+    QPainterPath m_oldPath;
+    QPainterPath m_newPath;
+    bool m_firstRedo = true;
+};
+
+class BakeFloatingUndoCommand : public QUndoCommand {
+public:
+    BakeFloatingUndoCommand(Document* doc,
+                            int layerIndex,
+                            const QImage& preBakeImage,
+                            const QImage& postBakeImage,
+                            const FloatingSelectionState& floatingState,
+                            const QPainterPath& preSelectionPath,
+                            const QPainterPath& postSelectionPath,
+                            const QString& text = "Deselect");
+
+    void undo() override;
+    void redo() override;
+
+private:
+    Document* m_doc;
+    int m_layerIndex;
+    QImage m_preBakeImage;
+    QImage m_postBakeImage;
+    FloatingSelectionState m_floatingState;
+    QPainterPath m_preSelectionPath;
+    QPainterPath m_postSelectionPath;
+    bool m_firstRedo = true;
+};
+
 } // namespace pdn

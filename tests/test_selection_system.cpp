@@ -408,6 +408,378 @@ int main(int argc, char* argv[]) {
         std::cout << "  Passed: Ctrl+A selects all regardless of whether mode is Replace, Add, Subtract, Intersect, or Invert!" << std::endl;
     }
 
+    // Test 10: Disjoint multi-rectangle selection lifting and moving
+    {
+        std::cout << "Test 10: Disjoint multi-rectangle selection lifting and moving..." << std::endl;
+        auto doc = std::make_shared<pdn::Document>(100, 100);
+        auto layer = doc->activeLayer();
+        assert(layer != nullptr);
+        // Fill layer with green
+        layer->image().fill(qRgba(0, 255, 0, 255));
+
+        // Add Rect 1 at (10, 10, 20, 20)
+        doc->selection().addRect(QRectF(10, 10, 20, 20), pdn::SelectionCombineMode::Replace);
+        // Add Rect 2 at (60, 60, 20, 20) with Union
+        doc->selection().addRect(QRectF(60, 60, 20, 20), pdn::SelectionCombineMode::Union);
+
+        // Gap point (40, 40) is inside the bounding box (10, 10, 70, 70) but NOT selected
+        assert(!doc->selection().containsPixel(40, 40));
+        assert(doc->selection().containsPixel(15, 15));
+        assert(doc->selection().containsPixel(65, 65));
+
+        // Lift selection to floating
+        doc->liftSelectionToFloating();
+        assert(doc->hasFloatingSelection());
+
+        // On document layer, selected pixels should be cleared (transparent), but gap pixel (40, 40) must remain green!
+        assert(qAlpha(layer->image().pixel(15, 15)) == 0);
+        assert(qAlpha(layer->image().pixel(65, 65)) == 0);
+        assert(layer->image().pixel(40, 40) == qRgba(0, 255, 0, 255));
+        assert(layer->image().pixel(5, 5) == qRgba(0, 255, 0, 255));
+
+        // In floating image, gap pixel relative to bounds (10, 10) -> (30, 30) must be transparent!
+        const QImage& floatImg = doc->floatingImage();
+        assert(qAlpha(floatImg.pixel(40 - 10, 40 - 10)) == 0);
+        assert(qAlpha(floatImg.pixel(15 - 10, 15 - 10)) == 255);
+        assert(qAlpha(floatImg.pixel(65 - 10, 65 - 10)) == 255);
+
+        // Move floating selection by (5, 5)
+        doc->moveFloatingSelection(QPointF(5, 5));
+        assert(layer->image().pixel(40, 40) == qRgba(0, 255, 0, 255));
+
+        // Bake floating selection with Deselect
+        doc->bakeFloatingSelection(true, "Deselect");
+        assert(!doc->hasFloatingSelection());
+        assert(doc->selection().isEmpty());
+
+        // After baking, gap pixel (40, 40) must STILL be green, NOT overwritten with transparent or unselected bounding box pixels!
+        assert(layer->image().pixel(40, 40) == qRgba(0, 255, 0, 255));
+        // Moved rects at (15, 15) and (65, 65) should now be green at (20, 20) and (70, 70)
+        assert(layer->image().pixel(15 + 5, 15 + 5) == qRgba(0, 255, 0, 255));
+        assert(layer->image().pixel(65 + 5, 65 + 5) == qRgba(0, 255, 0, 255));
+
+        std::cout << "  Passed: Only actual disjoint selected pixels are lifted, gap pixels remain completely untouched!" << std::endl;
+    }
+
+    // Test 11: Fine-grained transformation history (Paste -> Move -> Resize -> Rotate -> Move -> Deselect)
+    {
+        std::cout << "Test 11: Fine-grained transformation history on floating selection..." << std::endl;
+        pdn::MainWindow win;
+        win.newDocument(100, 100);
+        auto doc = win.activeDocument();
+        assert(doc != nullptr);
+
+        // Create a test image to paste (30x30 red)
+        QImage pastedImg(30, 30, QImage::Format_ARGB32);
+        pastedImg.fill(qRgba(255, 0, 0, 255));
+
+        int initialCount = doc->undoStack()->count();
+
+        // 1. Paste
+        bool pasteOk = win.pasteImage(pastedImg, pdn::CanvasExpandChoice::Cancel);
+        assert(pasteOk);
+        assert(doc->hasFloatingSelection());
+        assert(doc->undoStack()->count() == initialCount + 1);
+        assert(doc->undoStack()->text(initialCount) == "Paste");
+
+        pdn::MoveSelectedPixelsTool moveTool;
+        pdn::ToolContext ctx;
+        moveTool.activate(doc.get(), ctx);
+
+        // 2. Move
+        // Press at (15, 15) inside pasted image, drag to (25, 25)
+        auto press1 = createMouseEvent(QEvent::MouseButtonPress, QPointF(15, 15), Qt::LeftButton, Qt::LeftButton, Qt::NoModifier);
+        moveTool.mousePress(&press1, doc.get(), QPointF(15, 15), ctx);
+        auto drag1 = createMouseEvent(QEvent::MouseMove, QPointF(25, 25), Qt::LeftButton, Qt::LeftButton, Qt::NoModifier);
+        moveTool.mouseMove(&drag1, doc.get(), QPointF(25, 25), ctx);
+        auto release1 = createMouseEvent(QEvent::MouseButtonRelease, QPointF(25, 25), Qt::LeftButton, Qt::NoButton, Qt::NoModifier);
+        moveTool.mouseRelease(&release1, doc.get(), QPointF(25, 25), ctx);
+
+        assert(doc->undoStack()->count() == initialCount + 2);
+        assert(doc->undoStack()->text(initialCount + 1) == "Move Pixels");
+        assert(doc->hasFloatingSelection());
+
+        // 3. Resize (drag SE corner handle)
+        // Current bounding box is at (10, 10, 30, 30), so SE corner is (40, 40)
+        auto press2 = createMouseEvent(QEvent::MouseButtonPress, QPointF(40, 40), Qt::LeftButton, Qt::LeftButton, Qt::NoModifier);
+        moveTool.mousePress(&press2, doc.get(), QPointF(40, 40), ctx);
+        auto drag2 = createMouseEvent(QEvent::MouseMove, QPointF(50, 50), Qt::LeftButton, Qt::LeftButton, Qt::NoModifier);
+        moveTool.mouseMove(&drag2, doc.get(), QPointF(50, 50), ctx);
+        auto release2 = createMouseEvent(QEvent::MouseButtonRelease, QPointF(50, 50), Qt::LeftButton, Qt::NoButton, Qt::NoModifier);
+        moveTool.mouseRelease(&release2, doc.get(), QPointF(50, 50), ctx);
+
+        assert(doc->undoStack()->count() == initialCount + 3);
+        assert(doc->undoStack()->text(initialCount + 2) == "Resize Pixels");
+        assert(doc->hasFloatingSelection());
+
+        // 4. Rotate (right-click drag)
+        auto press3 = createMouseEvent(QEvent::MouseButtonPress, QPointF(20, 20), Qt::RightButton, Qt::RightButton, Qt::NoModifier);
+        moveTool.mousePress(&press3, doc.get(), QPointF(20, 20), ctx);
+        auto drag3 = createMouseEvent(QEvent::MouseMove, QPointF(30, 40), Qt::RightButton, Qt::RightButton, Qt::NoModifier);
+        moveTool.mouseMove(&drag3, doc.get(), QPointF(30, 40), ctx);
+        auto release3 = createMouseEvent(QEvent::MouseButtonRelease, QPointF(30, 40), Qt::RightButton, Qt::NoButton, Qt::NoModifier);
+        moveTool.mouseRelease(&release3, doc.get(), QPointF(30, 40), ctx);
+
+        assert(doc->undoStack()->count() == initialCount + 4);
+        assert(doc->undoStack()->text(initialCount + 3) == "Rotate Pixels");
+        assert(doc->hasFloatingSelection());
+
+        // 5. Second Move
+        QPointF centerPt = doc->selection().boundingRect().center();
+        auto press4 = createMouseEvent(QEvent::MouseButtonPress, centerPt, Qt::LeftButton, Qt::LeftButton, Qt::NoModifier);
+        moveTool.mousePress(&press4, doc.get(), centerPt, ctx);
+        auto drag4 = createMouseEvent(QEvent::MouseMove, centerPt + QPointF(10, 5), Qt::LeftButton, Qt::LeftButton, Qt::NoModifier);
+        moveTool.mouseMove(&drag4, doc.get(), centerPt + QPointF(10, 5), ctx);
+        auto release4 = createMouseEvent(QEvent::MouseButtonRelease, centerPt + QPointF(10, 5), Qt::LeftButton, Qt::NoButton, Qt::NoModifier);
+        moveTool.mouseRelease(&release4, doc.get(), centerPt + QPointF(10, 5), ctx);
+
+        assert(doc->undoStack()->count() == initialCount + 5);
+        assert(doc->undoStack()->text(initialCount + 4) == "Move Pixels");
+        assert(doc->hasFloatingSelection());
+
+        // 6. Deselect
+        win.onDeselect();
+        assert(doc->undoStack()->count() == initialCount + 6);
+        assert(doc->undoStack()->text(initialCount + 5) == "Deselect");
+        assert(!doc->hasFloatingSelection());
+        assert(doc->selection().isEmpty());
+
+        // Test Undo step-by-step
+        // Undo Deselect -> restores floating selection
+        doc->undoStack()->undo();
+        assert(doc->hasFloatingSelection());
+        assert(!doc->selection().isEmpty());
+
+        // Undo 2nd Move
+        doc->undoStack()->undo();
+        assert(doc->hasFloatingSelection());
+
+        // Undo Rotate
+        doc->undoStack()->undo();
+        assert(doc->hasFloatingSelection());
+
+        // Undo Resize
+        doc->undoStack()->undo();
+        assert(doc->hasFloatingSelection());
+
+        // Undo 1st Move
+        doc->undoStack()->undo();
+        assert(doc->hasFloatingSelection());
+        assert(doc->floatingOffset() == QPointF(0, 0));
+
+        // Undo Paste
+        doc->undoStack()->undo();
+        assert(!doc->hasFloatingSelection());
+
+        // Test Redo step-by-step
+        doc->undoStack()->redo(); // Redo Paste
+        assert(doc->hasFloatingSelection());
+
+        doc->undoStack()->redo(); // Redo 1st Move
+        assert(doc->hasFloatingSelection());
+
+        doc->undoStack()->redo(); // Redo Resize
+        assert(doc->hasFloatingSelection());
+
+        doc->undoStack()->redo(); // Redo Rotate
+        assert(doc->hasFloatingSelection());
+
+        doc->undoStack()->redo(); // Redo 2nd Move
+        assert(doc->hasFloatingSelection());
+
+        doc->undoStack()->redo(); // Redo Deselect
+        assert(!doc->hasFloatingSelection());
+        assert(doc->selection().isEmpty());
+
+        std::cout << "  Passed: Every small change (Paste, Move, Resize, Rotate, Move, Deselect) is an individual history entry with full undo/redo!" << std::endl;
+    }
+
+    // Test 12: Fine-grained history for lifting pixels and moving selection outline
+    {
+        std::cout << "Test 12: Lifting pixels and moving selection history..." << std::endl;
+        pdn::MainWindow win;
+        win.newDocument(100, 100);
+        auto doc = win.activeDocument();
+        assert(doc != nullptr);
+
+        // Draw blue into active layer
+        doc->activeLayer()->image().fill(qRgba(0, 0, 255, 255));
+
+        // Select (20, 20, 30, 30)
+        doc->selection().addRect(QRectF(20, 20, 30, 30), pdn::SelectionCombineMode::Replace);
+
+        int initialCount = doc->undoStack()->count();
+
+        // 1. Move Selected Pixels tool lifts and moves
+        pdn::MoveSelectedPixelsTool pixTool;
+        pdn::ToolContext ctx;
+        pixTool.activate(doc.get(), ctx);
+
+        auto press1 = createMouseEvent(QEvent::MouseButtonPress, QPointF(30, 30), Qt::LeftButton, Qt::LeftButton, Qt::NoModifier);
+        pixTool.mousePress(&press1, doc.get(), QPointF(30, 30), ctx);
+        auto drag1 = createMouseEvent(QEvent::MouseMove, QPointF(40, 40), Qt::LeftButton, Qt::LeftButton, Qt::NoModifier);
+        pixTool.mouseMove(&drag1, doc.get(), QPointF(40, 40), ctx);
+        auto release1 = createMouseEvent(QEvent::MouseButtonRelease, QPointF(40, 40), Qt::LeftButton, Qt::NoButton, Qt::NoModifier);
+        pixTool.mouseRelease(&release1, doc.get(), QPointF(40, 40), ctx);
+
+        assert(doc->undoStack()->count() == initialCount + 1);
+        assert(doc->undoStack()->text(initialCount) == "Move Pixels");
+        assert(doc->hasFloatingSelection());
+
+        // 2. Nudge with arrow keys
+        pixTool.nudge(doc.get(), 2, 3);
+        assert(doc->undoStack()->count() == initialCount + 2);
+        assert(doc->undoStack()->text(initialCount + 1) == "Move Pixels");
+
+        // 3. Deselect
+        win.onDeselect();
+        assert(doc->undoStack()->count() == initialCount + 3);
+        assert(doc->undoStack()->text(initialCount + 2) == "Deselect");
+        assert(!doc->hasFloatingSelection());
+        assert(doc->selection().isEmpty());
+
+        // Undo Deselect
+        doc->undoStack()->undo();
+        assert(doc->hasFloatingSelection());
+
+        // Undo Nudge
+        doc->undoStack()->undo();
+        assert(doc->hasFloatingSelection());
+
+        // Undo initial Lift and Move
+        doc->undoStack()->undo();
+        assert(!doc->hasFloatingSelection());
+        // Layer should be restored to completely blue
+        assert(doc->activeLayer()->image().pixel(25, 25) == qRgba(0, 0, 255, 255));
+
+        // Test MoveSelectionTool fine-grained history (outline only)
+        doc->selection().addRect(QRectF(10, 10, 20, 20), pdn::SelectionCombineMode::Replace);
+        int selIndex = doc->undoStack()->index();
+
+        pdn::MoveSelectionTool selTool;
+        selTool.activate(doc.get(), ctx);
+
+        auto sPress = createMouseEvent(QEvent::MouseButtonPress, QPointF(15, 15), Qt::LeftButton, Qt::LeftButton, Qt::NoModifier);
+        selTool.mousePress(&sPress, doc.get(), QPointF(15, 15), ctx);
+        auto sDrag = createMouseEvent(QEvent::MouseMove, QPointF(25, 25), Qt::LeftButton, Qt::LeftButton, Qt::NoModifier);
+        selTool.mouseMove(&sDrag, doc.get(), QPointF(25, 25), ctx);
+        auto sRelease = createMouseEvent(QEvent::MouseButtonRelease, QPointF(25, 25), Qt::LeftButton, Qt::NoButton, Qt::NoModifier);
+        selTool.mouseRelease(&sRelease, doc.get(), QPointF(25, 25), ctx);
+
+        assert(doc->undoStack()->index() == selIndex + 1);
+        assert(doc->undoStack()->text(selIndex) == "Move Selection");
+
+        selTool.nudge(doc.get(), 1, 1);
+        assert(doc->undoStack()->index() == selIndex + 2);
+        assert(doc->undoStack()->text(selIndex + 1) == "Move Selection");
+
+        doc->undoStack()->undo();
+        doc->undoStack()->undo();
+        assert(doc->selection().boundingRect() == QRectF(10, 10, 20, 20));
+
+        std::cout << "  Passed: Lifting pixels and moving selection outline both create fine-grained history entries!" << std::endl;
+    }
+
+    // Test 13: Undo/Redo while on floating layer maintains floating layer and content
+    {
+        std::cout << "Test 13: Undo/Redo while on floating layer maintains floating layer and content..." << std::endl;
+        pdn::MainWindow win;
+        win.newDocument(100, 100);
+        auto doc = win.activeDocument();
+        assert(doc != nullptr);
+
+        // Find Edit -> Undo and Redo actions
+        QAction* undoAction = nullptr;
+        QAction* redoAction = nullptr;
+        for (auto act : win.findChildren<QAction*>()) {
+            if (act->text().contains("Undo")) undoAction = act;
+            if (act->text().contains("Redo")) redoAction = act;
+        }
+        assert(undoAction != nullptr);
+        assert(redoAction != nullptr);
+
+        // Paste an image (30x30 red)
+        QImage pastedImg(30, 30, QImage::Format_ARGB32);
+        pastedImg.fill(qRgba(255, 0, 0, 255));
+        bool pasteOk = win.pasteImage(pastedImg, pdn::CanvasExpandChoice::Cancel);
+        assert(pasteOk);
+        assert(doc->hasFloatingSelection());
+        assert(!doc->floatingImage().isNull());
+
+        // Perform move 1: translate by (20, 10)
+        auto moveTool = std::dynamic_pointer_cast<pdn::MoveSelectedPixelsTool>(win.toolManager()->activeTool());
+        assert(moveTool != nullptr);
+        pdn::ToolContext ctx;
+
+        auto press1 = createMouseEvent(QEvent::MouseButtonPress, QPointF(15, 15), Qt::LeftButton, Qt::LeftButton, Qt::NoModifier);
+        moveTool->mousePress(&press1, doc.get(), QPointF(15, 15), ctx);
+        auto drag1 = createMouseEvent(QEvent::MouseMove, QPointF(35, 25), Qt::LeftButton, Qt::LeftButton, Qt::NoModifier);
+        moveTool->mouseMove(&drag1, doc.get(), QPointF(35, 25), ctx);
+        auto release1 = createMouseEvent(QEvent::MouseButtonRelease, QPointF(35, 25), Qt::LeftButton, Qt::NoButton, Qt::NoModifier);
+        moveTool->mouseRelease(&release1, doc.get(), QPointF(35, 25), ctx);
+
+        assert(doc->hasFloatingSelection());
+        assert(doc->floatingOffset() == QPointF(20, 10));
+
+        // Perform move 2: translate by another (10, 15) -> total (30, 25)
+        auto press2 = createMouseEvent(QEvent::MouseButtonPress, QPointF(35, 25), Qt::LeftButton, Qt::LeftButton, Qt::NoModifier);
+        moveTool->mousePress(&press2, doc.get(), QPointF(35, 25), ctx);
+        auto drag2 = createMouseEvent(QEvent::MouseMove, QPointF(45, 40), Qt::LeftButton, Qt::LeftButton, Qt::NoModifier);
+        moveTool->mouseMove(&drag2, doc.get(), QPointF(45, 40), ctx);
+        auto release2 = createMouseEvent(QEvent::MouseButtonRelease, QPointF(45, 40), Qt::LeftButton, Qt::NoButton, Qt::NoModifier);
+        moveTool->mouseRelease(&release2, doc.get(), QPointF(45, 40), ctx);
+
+        assert(doc->hasFloatingSelection());
+        assert(doc->floatingOffset() == QPointF(30, 25));
+
+        // Now trigger Undo via Edit->Undo action (simulating Ctrl+Z in UI)
+        undoAction->trigger();
+
+        // CRITICAL: Floating layer MUST NOT be removed! Content MUST NOT be gone!
+        assert(doc->hasFloatingSelection());
+        assert(!doc->floatingImage().isNull());
+        // Second move undone, offset should be back to (20, 10)
+        assert(doc->floatingOffset() == QPointF(20, 10));
+
+        // Trigger Undo again
+        undoAction->trigger();
+
+        // CRITICAL: Floating layer still present, offset back to (0, 0)
+        assert(doc->hasFloatingSelection());
+        assert(!doc->floatingImage().isNull());
+        assert(doc->floatingOffset() == QPointF(0, 0));
+
+        // Also test sending Ctrl+Z through eventFilter
+        // First redo to (20, 10)
+        redoAction->trigger();
+        assert(doc->hasFloatingSelection());
+        assert(doc->floatingOffset() == QPointF(20, 10));
+
+        // Send Ctrl+Z key event to MainWindow
+        QKeyEvent ctrlZ(QEvent::KeyPress, Qt::Key_Z, Qt::ControlModifier);
+        QApplication::sendEvent(&win, &ctrlZ);
+        // Ensure Ctrl+Z was not consumed as Zoom tool! Active tool must still be MoveSelectedPixels
+        assert(win.toolManager()->activeToolType() == pdn::ToolType::MoveSelectedPixels);
+
+        // Undo again via undoAction back to paste
+        undoAction->trigger();
+        assert(doc->hasFloatingSelection());
+        assert(doc->floatingOffset() == QPointF(0, 0));
+
+        // Now undo the Paste itself
+        undoAction->trigger();
+        // NOW floating layer is gone because Paste was undone
+        assert(!doc->hasFloatingSelection());
+
+        // Redo Paste
+        redoAction->trigger();
+        assert(doc->hasFloatingSelection());
+        assert(!doc->floatingImage().isNull());
+        assert(doc->floatingOffset() == QPointF(0, 0));
+
+        std::cout << "  Passed: Undo on floating layer keeps the floating layer active and undos individual steps!" << std::endl;
+    }
+
     std::cout << "All Selection System Tests Passed Successfully!" << std::endl;
     return 0;
 }

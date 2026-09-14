@@ -143,7 +143,6 @@ QPointF MoveToolBase::docToVp(const QPointF& docPt) const {
 TransformHandle MoveToolBase::hitTestHandle(const QPointF& docPos, const std::array<QPointF, 4>& quad) const {
     qreal zoom = m_lastRenderOpts.zoom > 0 ? m_lastRenderOpts.zoom : 1.0;
     qreal handleTol = 7.0 / zoom;
-    qreal edgeTol = 6.0 / zoom;
 
     // Corners
     if (QLineF(docPos, quad[0]).length() <= handleTol) return TransformHandle::NW;
@@ -162,36 +161,35 @@ TransformHandle MoveToolBase::hitTestHandle(const QPointF& docPos, const std::ar
     if (QLineF(docPos, midS).length() <= handleTol) return TransformHandle::S;
     if (QLineF(docPos, midW).length() <= handleTol) return TransformHandle::W;
 
-    // Border segments (edges)
-    if (distanceToSegment(docPos, quad[0], quad[1]) <= edgeTol) return TransformHandle::N;
-    if (distanceToSegment(docPos, quad[1], quad[2]) <= edgeTol) return TransformHandle::E;
-    if (distanceToSegment(docPos, quad[2], quad[3]) <= edgeTol) return TransformHandle::S;
-    if (distanceToSegment(docPos, quad[3], quad[0]) <= edgeTol) return TransformHandle::W;
-
     return TransformHandle::None;
 }
 
 bool MoveToolBase::hitTestInside(const QPointF& docPos, Document* doc, const std::array<QPointF, 4>& quad) const {
-    if (doc && doc->selection().contains(docPos)) {
-        return true;
+    if (doc && !doc->selection().isEmpty()) {
+        return doc->selection().contains(docPos);
     }
     QPolygonF poly;
     poly << quad[0] << quad[1] << quad[2] << quad[3];
     return poly.containsPoint(docPos, Qt::OddEvenFill);
 }
 
-void MoveToolBase::activate(Document* /*doc*/, ToolContext& /*ctx*/) {
+void MoveToolBase::activate(Document* doc, ToolContext& /*ctx*/) {
+    m_currentDoc = doc;
     m_hasSession = false;
     m_dragAction = DragAction::None;
     m_activeHandle = TransformHandle::None;
     m_hoverHandle = TransformHandle::None;
     m_hoverInside = false;
+    if (doc) {
+        initSessionFromDoc(doc);
+    }
 }
 
 void MoveToolBase::deactivate(Document* doc, ToolContext& /*ctx*/) {
     if (doc && m_hasSession) {
         onSessionEnded(doc);
     }
+    m_currentDoc = nullptr;
     m_hasSession = false;
     m_dragAction = DragAction::None;
     m_activeHandle = TransformHandle::None;
@@ -213,8 +211,16 @@ void MoveToolBase::updateDocTransform(Document* doc) {
 void MoveToolBase::mousePress(QMouseEvent* event, Document* doc, const QPointF& docPos, ToolContext& /*ctx*/) {
     if (!doc) return;
 
-    if (!m_hasSession || (isPixelTool() && !doc->hasFloatingSelection())) {
+    if (!m_hasSession) {
         initSessionFromDoc(doc);
+    } else if (isPixelTool()) {
+        if (!doc->hasFloatingSelection() || m_transform != doc->floatingTransform()) {
+            initSessionFromDoc(doc);
+        }
+    } else {
+        if (m_transform.map(m_localPath) != doc->selection().path()) {
+            initSessionFromDoc(doc);
+        }
     }
     if (!m_hasSession) return;
 
@@ -224,10 +230,33 @@ void MoveToolBase::mousePress(QMouseEvent* event, Document* doc, const QPointF& 
     m_initialTransform = m_transform;
     m_initialQuad = currentQuad();
     m_rotateCenter = currentCenter();
+    m_initialSelectionPath = doc->selection().path();
+    m_needsLiftOnDrag = (isPixelTool() && !doc->hasFloatingSelection() && !doc->selection().isEmpty());
+    m_wasLiftedInThisDrag = false;
 
     auto quad = m_initialQuad;
     TransformHandle hitHandle = hitTestHandle(docPos, quad);
     bool hitInside = hitTestInside(docPos, doc, quad);
+
+    if ((hitInside || hitHandle != TransformHandle::None) && isPixelTool() && !doc->hasFloatingSelection() && !doc->selection().isEmpty()) {
+        m_liftedLayerIndex = doc->activeLayerIndex();
+        if (auto layer = doc->activeLayer()) {
+            m_preLiftImage = layer->image().copy();
+            doc->liftSelectionToFloating();
+            m_postLiftImage = layer->image().copy();
+            m_liftedFloatingImage = doc->floatingImage();
+            m_initialTransform = doc->floatingTransform();
+            m_transform = m_initialTransform;
+            m_localRect = QRectF(0, 0, m_liftedFloatingImage.width(), m_liftedFloatingImage.height());
+            m_localPath = doc->selection().path();
+            QTransform inv = m_initialTransform.inverted();
+            m_localPath = inv.map(m_localPath);
+            m_initialQuad = currentQuad();
+            m_rotateCenter = currentCenter();
+            quad = m_initialQuad;
+            m_wasLiftedInThisDrag = true;
+        }
+    }
 
     if (event->button() == Qt::RightButton) {
         m_dragAction = DragAction::Rotating;
@@ -314,14 +343,22 @@ void MoveToolBase::mouseMove(QMouseEvent* event, Document* doc, const QPointF& d
         return;
     }
 
-    if (!m_hasSession && doc) {
+    if (doc) {
         if (isPixelTool()) {
-            if (doc->hasFloatingSelection() || !doc->selection().isEmpty()) {
-                initSessionFromDoc(doc);
+            if (doc->hasFloatingSelection()) {
+                if (!m_hasSession || m_transform != doc->floatingTransform()) {
+                    initSessionFromDoc(doc);
+                }
+            } else if (!doc->selection().isEmpty()) {
+                if (!m_hasSession) initSessionFromDoc(doc);
+            } else {
+                m_hasSession = false;
             }
         } else {
             if (!doc->selection().isEmpty()) {
-                initSessionFromDoc(doc);
+                if (!m_hasSession) initSessionFromDoc(doc);
+            } else {
+                m_hasSession = false;
             }
         }
     }
@@ -337,7 +374,34 @@ void MoveToolBase::mouseMove(QMouseEvent* event, Document* doc, const QPointF& d
 }
 
 void MoveToolBase::mouseRelease(QMouseEvent* event, Document* doc, const QPointF& docPos, ToolContext& /*ctx*/) {
-    if (!m_isDrag && event->button() == Qt::LeftButton) {
+    if (m_isDrag && doc) {
+        QString actionName;
+        if (m_dragAction == DragAction::Translating) actionName = "Move";
+        else if (m_dragAction == DragAction::Resizing) actionName = "Resize";
+        else if (m_dragAction == DragAction::Rotating) actionName = "Rotate";
+        else actionName = "Transform";
+
+        if (isPixelTool()) {
+            if (m_wasLiftedInThisDrag) {
+                m_wasLiftedInThisDrag = false;
+                doc->undoStack()->push(new LiftFloatingUndoCommand(doc, m_liftedLayerIndex,
+                                                                   m_preLiftImage, m_postLiftImage,
+                                                                   m_liftedFloatingImage,
+                                                                   m_initialTransform, m_transform,
+                                                                   m_initialSelectionPath, doc->selection().path(),
+                                                                   actionName + " Pixels"));
+            } else if (doc->hasFloatingSelection()) {
+                doc->undoStack()->push(new TransformFloatingUndoCommand(doc,
+                                                                       m_initialTransform, m_transform,
+                                                                       m_initialSelectionPath, doc->selection().path(),
+                                                                       actionName + " Pixels"));
+            }
+        } else {
+            doc->undoStack()->push(new TransformSelectionUndoCommand(doc,
+                                                                     m_initialSelectionPath, doc->selection().path(),
+                                                                     actionName + " Selection"));
+        }
+    } else if (!m_isDrag && event->button() == Qt::LeftButton) {
         if (m_hasSession) {
             auto quad = currentQuad();
             if (hitTestInside(docPos, doc, quad)) {
@@ -354,6 +418,8 @@ void MoveToolBase::mouseRelease(QMouseEvent* event, Document* doc, const QPointF
     m_dragAction = DragAction::None;
     m_activeHandle = TransformHandle::None;
     m_isDrag = false;
+    m_needsLiftOnDrag = false;
+    m_wasLiftedInThisDrag = false;
     m_accumulatedAngleDeg = 0.0;
 }
 
@@ -380,7 +446,7 @@ void MoveToolBase::keyPress(QKeyEvent* event, Document* doc, ToolContext& /*ctx*
         }
     } else if (event->key() == Qt::Key_Escape) {
         if (isPixelTool() && doc->hasFloatingSelection()) {
-            doc->cancelFloatingSelection();
+            onSessionEnded(doc);
             m_hasSession = false;
             event->accept();
         }
@@ -389,6 +455,27 @@ void MoveToolBase::keyPress(QKeyEvent* event, Document* doc, ToolContext& /*ctx*
 
 void MoveToolBase::drawOverlay(QPainter& painter, const RenderOptions& opts) {
     m_lastRenderOpts = opts;
+    if (m_currentDoc && !m_isDrag) {
+        if (isPixelTool()) {
+            if (m_currentDoc->hasFloatingSelection()) {
+                if (!m_hasSession || m_transform != m_currentDoc->floatingTransform()) {
+                    initSessionFromDoc(m_currentDoc);
+                }
+            } else if (!m_currentDoc->selection().isEmpty()) {
+                if (!m_hasSession) initSessionFromDoc(m_currentDoc);
+            } else {
+                m_hasSession = false;
+            }
+        } else {
+            if (!m_currentDoc->selection().isEmpty()) {
+                if (!m_hasSession || m_transform.map(m_localPath) != m_currentDoc->selection().path()) {
+                    initSessionFromDoc(m_currentDoc);
+                }
+            } else {
+                m_hasSession = false;
+            }
+        }
+    }
     if (!m_hasSession) return;
 
     auto quad = currentQuad();
@@ -399,13 +486,6 @@ void MoveToolBase::drawOverlay(QPainter& painter, const RenderOptions& opts) {
     }
 
     painter.save();
-
-    QPen linePen(QColor(50, 50, 50), 1.0, Qt::DashLine);
-    painter.setPen(linePen);
-    painter.setBrush(Qt::NoBrush);
-    QPolygonF poly;
-    poly << vpQuad[0] << vpQuad[1] << vpQuad[2] << vpQuad[3];
-    painter.drawPolygon(poly);
 
     std::array<QPointF, 8> handles;
     handles[0] = vpQuad[0];                     // NW
@@ -613,21 +693,26 @@ void MoveToolBase::applyResize(const QPointF& docPos, bool shiftHeld) {
 }
 
 // --- MoveSelectionTool ---
-void MoveSelectionTool::onSessionStarted(Document* doc) {
-    if (!doc || doc->selection().isEmpty()) return;
-
+void MoveSelectionTool::initSessionFromDoc(Document* doc) {
+    if (!doc || doc->selection().isEmpty()) {
+        m_hasSession = false;
+        return;
+    }
     m_startRegion = doc->selection().region();
-
     QRectF bounds = doc->selection().boundingRect();
-    if (bounds.isEmpty() || bounds.width() <= 0 || bounds.height() <= 0) return;
-
+    if (bounds.isEmpty() || bounds.width() <= 0 || bounds.height() <= 0) {
+        m_hasSession = false;
+        return;
+    }
     m_localRect = QRectF(0, 0, bounds.width(), bounds.height());
     m_transform = QTransform::fromTranslate(bounds.x(), bounds.y());
-
     m_localPath = doc->selection().path();
     m_localPath.translate(-bounds.x(), -bounds.y());
-
     m_hasSession = true;
+}
+
+void MoveSelectionTool::onSessionStarted(Document* doc) {
+    initSessionFromDoc(doc);
 }
 
 void MoveSelectionTool::onTransformUpdated(Document* doc) {
@@ -638,37 +723,67 @@ void MoveSelectionTool::onTransformUpdated(Document* doc) {
 }
 
 void MoveSelectionTool::onSessionEnded(Document* doc) {
-    if (!doc) return;
-    QRegion newRegion = doc->selection().region();
-    if (newRegion != m_startRegion) {
-        doc->undoStack()->push(new SelectionUndoCommand(doc, m_startRegion, newRegion, "Move Selection"));
+    Q_UNUSED(doc);
+    m_hasSession = false;
+}
+
+void MoveSelectionTool::nudge(Document* doc, qreal dx, qreal dy) {
+    if (!doc || doc->selection().isEmpty()) return;
+    if (!m_hasSession) {
+        initSessionFromDoc(doc);
+    }
+    if (!m_hasSession) return;
+
+    QPainterPath oldPath = doc->selection().path();
+    QTransform t;
+    t.translate(dx, dy);
+    m_transform = m_transform * t;
+    doc->selection().setPath(m_transform.map(m_localPath));
+    QPainterPath newPath = doc->selection().path();
+
+    doc->undoStack()->push(new TransformSelectionUndoCommand(doc, oldPath, newPath, "Move Selection"));
+    emit doc->selectionChanged();
+    emit doc->documentChanged();
+}
+
+// --- MoveSelectedPixelsTool ---
+void MoveSelectedPixelsTool::initSessionFromDoc(Document* doc) {
+    if (!doc) {
+        m_hasSession = false;
+        return;
+    }
+    if (doc->hasFloatingSelection()) {
+        const QImage& img = doc->originalFloatingImage().isNull() ? doc->floatingImage() : doc->originalFloatingImage();
+        if (img.width() <= 0 || img.height() <= 0) {
+            m_hasSession = false;
+            return;
+        }
+        m_localRect = QRectF(0, 0, img.width(), img.height());
+        m_transform = doc->floatingTransform();
+        m_localPath = doc->selection().path();
+        QTransform inv = m_transform.inverted();
+        m_localPath = inv.map(m_localPath);
+        m_hasSession = true;
+        return;
+    }
+    if (!doc->selection().isEmpty()) {
+        QRectF bounds = doc->selection().boundingRect();
+        if (bounds.width() <= 0 || bounds.height() <= 0) {
+            m_hasSession = false;
+            return;
+        }
+        m_localRect = QRectF(0, 0, bounds.width(), bounds.height());
+        m_transform = QTransform::fromTranslate(bounds.x(), bounds.y());
+        m_localPath = doc->selection().path();
+        m_localPath.translate(-bounds.x(), -bounds.y());
+        m_hasSession = true;
+        return;
     }
     m_hasSession = false;
 }
 
-// --- MoveSelectedPixelsTool ---
 void MoveSelectedPixelsTool::onSessionStarted(Document* doc) {
-    if (!doc) return;
-    if (!doc->hasFloatingSelection()) {
-        if (!doc->selection().isEmpty()) {
-            doc->liftSelectionToFloating();
-        } else {
-            return;
-        }
-    }
-    if (!doc->hasFloatingSelection()) return;
-
-    const QImage& img = doc->originalFloatingImage().isNull() ? doc->floatingImage() : doc->originalFloatingImage();
-    if (img.width() <= 0 || img.height() <= 0) return;
-
-    m_localRect = QRectF(0, 0, img.width(), img.height());
-    m_transform = doc->floatingTransform();
-
-    m_localPath = doc->selection().path();
-    QTransform inv = m_transform.inverted();
-    m_localPath = inv.map(m_localPath);
-
-    m_hasSession = true;
+    initSessionFromDoc(doc);
 }
 
 void MoveSelectedPixelsTool::onTransformUpdated(Document* doc) {
@@ -686,9 +801,46 @@ void MoveSelectedPixelsTool::onSessionEnded(Document* doc) {
 void MoveSelectedPixelsTool::commit(Document* doc) {
     if (!doc) return;
     if (doc->hasFloatingSelection()) {
-        doc->bakeFloatingSelection();
+        doc->bakeFloatingSelection(true, "Deselect");
     }
     m_hasSession = false;
+}
+
+void MoveSelectedPixelsTool::nudge(Document* doc, qreal dx, qreal dy) {
+    if (!doc) return;
+    if (!doc->hasFloatingSelection()) {
+        if (doc->selection().isEmpty()) return;
+        int layerIdx = doc->activeLayerIndex();
+        auto layer = doc->activeLayer();
+        if (!layer) return;
+        QImage preLift = layer->image().copy();
+        QPainterPath initialSel = doc->selection().path();
+        doc->liftSelectionToFloating();
+        QImage postLift = layer->image().copy();
+        QImage floatImg = doc->floatingImage();
+        QTransform initXform = doc->floatingTransform();
+        initSessionFromDoc(doc);
+        QTransform t;
+        t.translate(dx, dy);
+        m_transform = m_transform * t;
+        doc->setFloatingTransform(m_transform);
+        doc->selection().setPath(m_transform.map(m_localPath));
+        doc->undoStack()->push(new LiftFloatingUndoCommand(doc, layerIdx, preLift, postLift, floatImg, initXform, m_transform, initialSel, doc->selection().path(), "Move Pixels"));
+        emit doc->selectionChanged();
+        emit doc->documentChanged();
+        return;
+    }
+    initSessionFromDoc(doc);
+    QTransform oldXform = doc->floatingTransform();
+    QPainterPath oldPath = doc->selection().path();
+    QTransform t;
+    t.translate(dx, dy);
+    m_transform = m_transform * t;
+    doc->setFloatingTransform(m_transform);
+    doc->selection().setPath(m_transform.map(m_localPath));
+    doc->undoStack()->push(new TransformFloatingUndoCommand(doc, oldXform, m_transform, oldPath, doc->selection().path(), "Move Pixels"));
+    emit doc->selectionChanged();
+    emit doc->documentChanged();
 }
 
 } // namespace pdn

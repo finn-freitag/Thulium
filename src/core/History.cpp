@@ -243,4 +243,174 @@ void SelectionUndoCommand::redo() {
     emit m_doc->documentChanged();
 }
 
+PasteFloatingUndoCommand::PasteFloatingUndoCommand(Document* doc,
+                                                   const QImage& pastedImage,
+                                                   const QPoint& pastePos,
+                                                   int layerIndex,
+                                                   const QRegion& oldSelectionRegion,
+                                                   const QString& text)
+    : QUndoCommand(text), m_doc(doc), m_pastedImage(pastedImage), m_pastePos(pastePos),
+      m_layerIndex(layerIndex), m_oldSelectionRegion(oldSelectionRegion), m_firstRedo(true) {
+}
+
+void PasteFloatingUndoCommand::undo() {
+    m_doc->discardFloatingSelection();
+    m_doc->selection().setRegion(m_oldSelectionRegion);
+    emit m_doc->selectionChanged();
+    emit m_doc->documentChanged();
+}
+
+void PasteFloatingUndoCommand::redo() {
+    if (m_firstRedo) {
+        m_firstRedo = false;
+        return;
+    }
+    m_doc->setActiveLayerIndex(m_layerIndex);
+    m_doc->createFloatingSelection(m_pastedImage, m_pastePos, false, text());
+    m_doc->selection().clear();
+    m_doc->selection().addRect(QRectF(m_pastePos, m_pastedImage.size()), SelectionCombineMode::Replace);
+    emit m_doc->selectionChanged();
+    emit m_doc->documentChanged();
+}
+
+LiftFloatingUndoCommand::LiftFloatingUndoCommand(Document* doc,
+                                                int layerIndex,
+                                                const QImage& preLiftLayerImage,
+                                                const QImage& postLiftLayerImage,
+                                                const QImage& floatingImage,
+                                                const QTransform& initialTransform,
+                                                const QTransform& newTransform,
+                                                const QPainterPath& initialSelectionPath,
+                                                const QPainterPath& newSelectionPath,
+                                                const QString& text)
+    : QUndoCommand(text), m_doc(doc), m_layerIndex(layerIndex),
+      m_preLiftLayerImage(preLiftLayerImage), m_postLiftLayerImage(postLiftLayerImage),
+      m_floatingImage(floatingImage), m_initialTransform(initialTransform),
+      m_newTransform(newTransform), m_initialSelectionPath(initialSelectionPath),
+      m_newSelectionPath(newSelectionPath), m_firstRedo(true) {
+}
+
+void LiftFloatingUndoCommand::undo() {
+    m_doc->discardFloatingSelection();
+    if (auto l = m_doc->layer(m_layerIndex)) {
+        l->setImage(m_preLiftLayerImage.copy());
+    }
+    m_doc->selection().setPath(m_initialSelectionPath);
+    emit m_doc->selectionChanged();
+    emit m_doc->documentChanged();
+}
+
+void LiftFloatingUndoCommand::redo() {
+    if (m_firstRedo) {
+        m_firstRedo = false;
+        return;
+    }
+    if (auto l = m_doc->layer(m_layerIndex)) {
+        l->setImage(m_postLiftLayerImage.copy());
+    }
+    FloatingSelectionState state;
+    state.hasFloating = true;
+    state.image = m_floatingImage;
+    state.originalImage = m_floatingImage;
+    state.offset = m_newTransform.map(QPointF(0, 0));
+    state.transform = m_newTransform;
+    state.snapshot = m_preLiftLayerImage;
+    state.layerIndex = m_layerIndex;
+    state.isLifted = true;
+    state.actionName = text();
+    m_doc->setFloatingSelectionState(state);
+    m_doc->selection().setPath(m_newSelectionPath);
+    emit m_doc->selectionChanged();
+    emit m_doc->documentChanged();
+}
+
+TransformFloatingUndoCommand::TransformFloatingUndoCommand(Document* doc,
+                                                           const QTransform& oldTransform,
+                                                           const QTransform& newTransform,
+                                                           const QPainterPath& oldPath,
+                                                           const QPainterPath& newPath,
+                                                           const QString& text)
+    : QUndoCommand(text), m_doc(doc), m_oldTransform(oldTransform),
+      m_newTransform(newTransform), m_oldPath(oldPath), m_newPath(newPath), m_firstRedo(true) {
+}
+
+void TransformFloatingUndoCommand::undo() {
+    m_doc->setFloatingTransform(m_oldTransform);
+    m_doc->selection().setPath(m_oldPath);
+    emit m_doc->selectionChanged();
+    emit m_doc->documentChanged();
+}
+
+void TransformFloatingUndoCommand::redo() {
+    if (m_firstRedo) {
+        m_firstRedo = false;
+        return;
+    }
+    m_doc->setFloatingTransform(m_newTransform);
+    m_doc->selection().setPath(m_newPath);
+    emit m_doc->selectionChanged();
+    emit m_doc->documentChanged();
+}
+
+TransformSelectionUndoCommand::TransformSelectionUndoCommand(Document* doc,
+                                                             const QPainterPath& oldPath,
+                                                             const QPainterPath& newPath,
+                                                             const QString& text)
+    : QUndoCommand(text), m_doc(doc), m_oldPath(oldPath), m_newPath(newPath), m_firstRedo(true) {
+}
+
+void TransformSelectionUndoCommand::undo() {
+    m_doc->selection().setPath(m_oldPath);
+    emit m_doc->selectionChanged();
+    emit m_doc->documentChanged();
+}
+
+void TransformSelectionUndoCommand::redo() {
+    if (m_firstRedo) {
+        m_firstRedo = false;
+        return;
+    }
+    m_doc->selection().setPath(m_newPath);
+    emit m_doc->selectionChanged();
+    emit m_doc->documentChanged();
+}
+
+BakeFloatingUndoCommand::BakeFloatingUndoCommand(Document* doc,
+                                                 int layerIndex,
+                                                 const QImage& preBakeImage,
+                                                 const QImage& postBakeImage,
+                                                 const FloatingSelectionState& floatingState,
+                                                 const QPainterPath& preSelectionPath,
+                                                 const QPainterPath& postSelectionPath,
+                                                 const QString& text)
+    : QUndoCommand(text), m_doc(doc), m_layerIndex(layerIndex),
+      m_preBakeImage(preBakeImage), m_postBakeImage(postBakeImage),
+      m_floatingState(floatingState), m_preSelectionPath(preSelectionPath),
+      m_postSelectionPath(postSelectionPath), m_firstRedo(true) {
+}
+
+void BakeFloatingUndoCommand::undo() {
+    if (auto l = m_doc->layer(m_layerIndex)) {
+        l->setImage(m_preBakeImage.copy());
+    }
+    m_doc->setFloatingSelectionState(m_floatingState);
+    m_doc->selection().setPath(m_preSelectionPath);
+    emit m_doc->selectionChanged();
+    emit m_doc->documentChanged();
+}
+
+void BakeFloatingUndoCommand::redo() {
+    if (m_firstRedo) {
+        m_firstRedo = false;
+        return;
+    }
+    if (auto l = m_doc->layer(m_layerIndex)) {
+        l->setImage(m_postBakeImage.copy());
+    }
+    m_doc->discardFloatingSelection();
+    m_doc->selection().setPath(m_postSelectionPath);
+    emit m_doc->selectionChanged();
+    emit m_doc->documentChanged();
+}
+
 } // namespace pdn

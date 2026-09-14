@@ -12,6 +12,18 @@
 
 namespace pdn {
 
+struct FloatingSelectionState {
+    bool hasFloating = false;
+    QImage image;
+    QImage originalImage;
+    QTransform transform;
+    QPointF offset;
+    QImage snapshot;
+    int layerIndex = 0;
+    bool isLifted = false;
+    QString actionName;
+};
+
 class Document : public QObject {
     Q_OBJECT
 public:
@@ -68,11 +80,14 @@ public:
     const QTransform& floatingTransform() const { return m_floatingTransform; }
     bool isFloatingLifted() const { return m_floatingIsLifted; }
 
+    FloatingSelectionState floatingSelectionState() const;
+    void setFloatingSelectionState(const FloatingSelectionState& state);
+
     void createFloatingSelection(const QImage& image, const QPointF& offset, bool isLifted, const QString& actionName = "Paste");
     void liftSelectionToFloating();
     void moveFloatingSelection(const QPointF& delta);
     void setFloatingTransform(const QTransform& transform);
-    void bakeFloatingSelection();
+    void bakeFloatingSelection(bool recordUndo = true, const QString& actionName = "Deselect");
     void cancelFloatingSelection();
     void discardFloatingSelection();
 

@@ -133,6 +133,15 @@ bool ToolManager::handleKeyPress(QKeyEvent* event) {
     }
 
     int key = event->key();
+    Qt::KeyboardModifiers mods = event->modifiers();
+
+    // If Control, Alt, or Meta is held, do not trigger single-key tool shortcuts
+    if (mods & (Qt::ControlModifier | Qt::AltModifier | Qt::MetaModifier)) {
+        // Only allow arrow keys for nudging
+        if (key != Qt::Key_Left && key != Qt::Key_Right && key != Qt::Key_Up && key != Qt::Key_Down) {
+            return false;
+        }
+    }
 
     // Color swap: X
     if (key == Qt::Key_X) {
@@ -210,6 +219,12 @@ bool ToolManager::handleKeyPress(QKeyEvent* event) {
                     movePixTool->nudge(m_document, dx, dy);
                     return true;
                 }
+            } else if (m_activeToolType == ToolType::MoveSelection) {
+                auto moveSelTool = std::dynamic_pointer_cast<MoveSelectionTool>(activeTool());
+                if (moveSelTool) {
+                    moveSelTool->nudge(m_document, dx, dy);
+                    return true;
+                }
             }
             QRegion oldRegion = m_document->selection().region();
             m_document->selection().translate(dx, dy);
@@ -225,10 +240,14 @@ bool ToolManager::handleKeyPress(QKeyEvent* event) {
 
     // Escape to deselect if selection is active
     if (key == Qt::Key_Escape) {
-        if (m_document && !m_document->selection().isEmpty()) {
-            QRegion oldRegion = m_document->selection().region();
-            m_document->clearSelection();
-            m_document->undoStack()->push(new SelectionUndoCommand(m_document, oldRegion, QRegion(), "Deselect"));
+        if (m_document && (!m_document->selection().isEmpty() || m_document->hasFloatingSelection())) {
+            if (m_document->hasFloatingSelection()) {
+                m_document->clearSelection();
+            } else {
+                QRegion oldRegion = m_document->selection().region();
+                m_document->clearSelection();
+                m_document->undoStack()->push(new SelectionUndoCommand(m_document, oldRegion, QRegion(), "Deselect"));
+            }
             return true;
         }
     }

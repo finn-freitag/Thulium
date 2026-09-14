@@ -424,10 +424,6 @@ void MainWindow::setupMenus() {
     QMenu* editMenu = mb->addMenu("&Edit");
     QAction* undoAct = editMenu->addAction("&Undo", this, [this]() {
         if (m_doc) {
-            if (m_doc->hasFloatingSelection()) {
-                m_doc->cancelFloatingSelection();
-                return;
-            }
             m_doc->undoStack()->undo();
         }
     }, QKeySequence::Undo);
@@ -811,15 +807,15 @@ void MainWindow::onCopy() {
     QRect srcRect = bounds.toAlignedRect().intersected(QRect(0, 0, m_doc->width(), m_doc->height()));
     if (srcRect.isEmpty()) return;
 
-    QImage cropped = layer->image().copy(srcRect);
+    QImage cropped(srcRect.size(), QImage::Format_ARGB32);
+    cropped.fill(Qt::transparent);
 
+    QPainter p(&cropped);
     if (!m_doc->selection().isEmpty()) {
-        QPainter p(&cropped);
-        p.setCompositionMode(QPainter::CompositionMode_DestinationIn);
-        p.translate(-srcRect.x(), -srcRect.y());
-        p.fillPath(m_doc->selection().path(), Qt::black);
-        p.end();
+        p.setClipPath(m_doc->selection().path().translated(-srcRect.x(), -srcRect.y()));
     }
+    p.drawImage(-srcRect.x(), -srcRect.y(), layer->image());
+    p.end();
 
     s_lastCopiedPos = srcRect.topLeft();
     s_lastCopiedSize = cropped.size();
@@ -980,13 +976,17 @@ bool MainWindow::pasteImage(const QImage& img, CanvasExpandChoice expandChoice, 
     }
 
     if (m_doc->hasFloatingSelection()) {
-        m_doc->bakeFloatingSelection();
+        m_doc->bakeFloatingSelection(true, "Deselect");
     }
+
+    QRegion oldRegion = m_doc->selection().region();
 
     m_doc->createFloatingSelection(img, pastePos, false, "Paste");
 
     m_doc->selection().clear();
     m_doc->selection().addRect(QRectF(pastePos, img.size()), SelectionCombineMode::Replace);
+
+    m_doc->undoStack()->push(new PasteFloatingUndoCommand(m_doc.get(), img, pastePos, m_doc->activeLayerIndex(), oldRegion, "Paste"));
 
     emit m_doc->selectionChanged();
     emit m_doc->documentChanged();
@@ -1020,7 +1020,7 @@ bool MainWindow::pasteImageIntoNewLayer(const QImage& img, CanvasExpandChoice ex
     }
 
     if (m_doc->hasFloatingSelection()) {
-        m_doc->bakeFloatingSelection();
+        m_doc->bakeFloatingSelection(true, "Deselect");
     }
 
     QString layerName = sourceName.isEmpty() ? "Pasted Layer" : sourceName;
@@ -1031,10 +1031,14 @@ bool MainWindow::pasteImageIntoNewLayer(const QImage& img, CanvasExpandChoice ex
         m_toolMgr->setActiveTool(ToolType::MoveSelectedPixels);
     }
 
+    QRegion oldRegion = m_doc->selection().region();
+
     m_doc->createFloatingSelection(img, pastePos, false, "Paste into New Layer");
 
     m_doc->selection().clear();
     m_doc->selection().addRect(QRectF(pastePos, img.size()), SelectionCombineMode::Replace);
+
+    m_doc->undoStack()->push(new PasteFloatingUndoCommand(m_doc.get(), img, pastePos, m_doc->activeLayerIndex(), oldRegion, "Paste into New Layer"));
 
     emit m_doc->selectionChanged();
     emit m_doc->documentChanged();
@@ -1063,7 +1067,7 @@ bool MainWindow::addImageAsLayer(const QImage& img, const QString& layerName, Ca
     }
 
     if (m_doc->hasFloatingSelection()) {
-        m_doc->bakeFloatingSelection();
+        m_doc->bakeFloatingSelection(true, "Deselect");
     }
 
     QString lName = layerName.isEmpty() ? "Layer" : layerName;
@@ -1074,10 +1078,14 @@ bool MainWindow::addImageAsLayer(const QImage& img, const QString& layerName, Ca
         m_toolMgr->setActiveTool(ToolType::MoveSelectedPixels);
     }
 
+    QRegion oldRegion = m_doc->selection().region();
+
     m_doc->createFloatingSelection(img, QPoint(0, 0), false, "Add Layer From File");
 
     m_doc->selection().clear();
     m_doc->selection().addRect(QRectF(0, 0, img.width(), img.height()), SelectionCombineMode::Replace);
+
+    m_doc->undoStack()->push(new PasteFloatingUndoCommand(m_doc.get(), img, QPoint(0, 0), m_doc->activeLayerIndex(), oldRegion, "Add Layer From File"));
 
     emit m_doc->selectionChanged();
     emit m_doc->documentChanged();
@@ -1175,7 +1183,10 @@ void MainWindow::onSelectAll() {
 }
 
 void MainWindow::onDeselect() {
-    if (m_doc && !m_doc->selection().isEmpty()) {
+    if (!m_doc) return;
+    if (m_doc->hasFloatingSelection()) {
+        m_doc->clearSelection();
+    } else if (!m_doc->selection().isEmpty()) {
         QRegion oldRegion = m_doc->selection().region();
         m_doc->clearSelection();
         m_doc->undoStack()->push(new SelectionUndoCommand(m_doc.get(), oldRegion, QRegion(), "Deselect"));
