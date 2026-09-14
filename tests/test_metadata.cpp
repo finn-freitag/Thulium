@@ -21,9 +21,9 @@ int main(int argc, char* argv[]) {
         m.title = "Sunset Over Hills";
         m.author = "Finn Developer";
         m.copyright = "Copyright (c) 2026";
-        m.description = "A peaceful landscape created in Paint.NET Clone.";
+        m.description = "A peaceful landscape created in Thulium.";
         m.creationDate = "2026-09-13T22:30:00";
-        m.software = "Paint.NET Clone";
+        m.software = "Thulium";
 
         assert(!m.isEmpty());
 
@@ -53,7 +53,7 @@ int main(int argc, char* argv[]) {
         newMeta.copyright = "Public Domain";
         newMeta.description = "Iconic artwork";
         newMeta.creationDate = "1503-01-01";
-        newMeta.software = "Paint.NET Clone";
+        newMeta.software = "Thulium";
 
         doc.setMetadata(newMeta, true);
         assert(doc.metadata() == newMeta);
@@ -82,7 +82,7 @@ int main(int argc, char* argv[]) {
         meta.copyright = "2026 Free Software";
         meta.description = "Testing PDN XML custom metadata preservation";
         meta.creationDate = "2026-09-13T22:00:00";
-        meta.software = "Paint.NET Clone v1.0";
+        meta.software = "Thulium v1.0";
         doc.setMetadata(meta, false);
 
         QString tmpPdn = "/tmp/test_metadata_roundtrip.pdn";
@@ -130,7 +130,7 @@ int main(int argc, char* argv[]) {
         meta.copyright = "Copyright 2026 PNG";
         meta.description = "A description in PNG tEXt chunk";
         meta.creationDate = "2026-09-13T22:15:00";
-        meta.software = "Paint.NET Clone";
+        meta.software = "Thulium";
         doc.setMetadata(meta, false);
 
         QString tmpPng = "/tmp/test_metadata.png";
@@ -159,7 +159,7 @@ int main(int argc, char* argv[]) {
         meta.copyright = "Copyright 2026 JPEG";
         meta.description = "A photo description";
         meta.creationDate = "2026-09-13T22:15:00";
-        meta.software = "Paint.NET Clone";
+        meta.software = "Thulium";
         doc.setMetadata(meta, false);
 
         QString tmpJpg = "/tmp/test_metadata.jpg";
@@ -188,7 +188,7 @@ int main(int argc, char* argv[]) {
         meta.copyright = "Sample Copyright";
         meta.description = "Sample Description";
         meta.creationDate = "2026-09-13T22:30:00";
-        meta.software = "Paint.NET Clone";
+        meta.software = "Thulium";
         doc.setMetadata(meta, false);
 
         pdn::MetadataDialog dlg(&doc);

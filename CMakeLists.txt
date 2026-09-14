@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(PaintNetClone LANGUAGES CXX)
+project(Thulium LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -132,8 +132,8 @@ target_include_directories(pdn_core PUBLIC
 )
 
 # Main executable
-add_executable(paintnet-clone src/main.cpp)
-target_link_libraries(paintnet-clone PRIVATE pdn_core)
+add_executable(thulium src/main.cpp)
+target_link_libraries(thulium PRIVATE pdn_core)
 
 # Tests
 enable_testing()

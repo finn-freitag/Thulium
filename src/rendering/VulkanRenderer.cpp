@@ -16,9 +16,9 @@ VulkanRenderer::~VulkanRenderer() {
 bool VulkanRenderer::initVulkanInstance() {
     VkApplicationInfo appInfo{};
     appInfo.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
-    appInfo.pApplicationName = "Paint.NET Clone";
+    appInfo.pApplicationName = "Thulium";
     appInfo.applicationVersion = VK_MAKE_VERSION(1, 0, 0);
-    appInfo.pEngineName = "PDN Vulkan Engine";
+    appInfo.pEngineName = "Thulium Vulkan Engine";
     appInfo.engineVersion = VK_MAKE_VERSION(1, 0, 0);
     appInfo.apiVersion = VK_API_VERSION_1_2;
 

@@ -28,6 +28,14 @@ int main(int argc, char* argv[]) {
     QString cardPdn = srcDir + "/Card.pdn";
     QString cmakeFile = srcDir + "/CMakeLists.txt";
 
+    if (!QFileInfo::exists(cardPng) && QFileInfo::exists(cardPdn)) {
+        QString err;
+        QImage img = pdn::ImageIO::loadImage(cardPdn, &err);
+        if (!img.isNull()) {
+            img.save(cardPng);
+        }
+    }
+
     // Test 1: ImageIO::isImageFile and ImageIO::loadImage
     {
         std::cout << "Test 1: ImageIO file inspection and loading..." << std::endl;

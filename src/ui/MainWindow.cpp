@@ -52,7 +52,7 @@ MainWindow::MainWindow(QWidget* parent)
       m_toolMgr(new ToolManager(this)),
       m_pluginMgr(new PluginManager(this)) {
     initResources();
-    setWindowTitle("Paint.NET Clone");
+    setWindowTitle("Thulium");
     resize(1200, 800);
     setAcceptDrops(true);
 
@@ -334,7 +334,7 @@ bool MainWindow::openFile(const QString& filePath) {
 }
 
 void MainWindow::updateTitle() {
-    QString title = "Paint.NET Clone - ";
+    QString title = "Thulium - ";
     if (m_doc) {
         title += m_doc->fileName();
         if (m_doc->isModified()) {
@@ -528,7 +528,7 @@ void MainWindow::setupMenus() {
 
     // --- Help Menu ---
     QMenu* helpMenu = mb->addMenu("&Help");
-    helpMenu->addAction("&About Paint.NET Clone...", this, &MainWindow::onAbout);
+    helpMenu->addAction("&About Thulium...", this, &MainWindow::onAbout);
 }
 
 void MainWindow::setupToolbars() {
@@ -841,7 +841,7 @@ QImage MainWindow::getClipboardImage(QString* outFileName) const {
 
 CanvasExpandChoice MainWindow::askCanvasExpand(bool isPaste) {
     QMessageBox box(this);
-    box.setWindowTitle("Paint.NET Clone");
+    box.setWindowTitle("Thulium");
     box.setIcon(QMessageBox::Question);
     if (isPaste) {
         box.setText("The image being pasted is larger than the canvas size.\n\nWould you like to expand the canvas size?");
@@ -867,7 +867,7 @@ CanvasExpandChoice MainWindow::askCanvasExpand(bool isPaste) {
 
 DropActionChoice MainWindow::askDropAction(const QStringList& filePaths) {
     QMessageBox box(this);
-    box.setWindowTitle("Paint.NET Clone");
+    box.setWindowTitle("Thulium");
     box.setIcon(QMessageBox::Question);
     if (filePaths.size() == 1) {
         box.setText(QString("Do you want to open \"%1\" as a new document, or add it as a new layer to the current document?")
@@ -1231,16 +1231,16 @@ void MainWindow::onResetWindowLocations() {
 }
 
 void MainWindow::onAbout() {
-    QMessageBox::about(this, "About Paint.NET Clone",
-        "<h3>Paint.NET Clone</h3>"
-        "<p>Cross-platform Paint.NET clone written in C++ with Qt 6 and native Vulkan GPU rendering.</p>"
+    QMessageBox::about(this, "About Thulium",
+        "<h3>Thulium</h3>"
+        "<p>Cross-platform image editor written in C++ with Qt 6 and native Vulkan GPU rendering.</p>"
         "<p>Features:"
         "<ul>"
         "<li>Multiple images / documents in one window with thumbnail strip</li>"
-        "<li>PDN3 format reader/writer (100% Paint.NET compatible)</li>"
+        "<li>PDN3 format reader/writer (Paint.NET compatible)</li>"
         "<li>PNG, JPG, BMP, GIF, WebP support</li>"
-        "<li>19 Paint.NET tools with options toolbar</li>"
-        "<li>Paint.NET Color Picker with HSV Wheel & Swatches</li>"
+        "<li>19 raster editing tools with options toolbar</li>"
+        "<li>Color Picker with HSV Wheel & Swatches</li>"
         "<li>Multi-layer editing with all 14 blend modes</li>"
         "<li>Undo / Redo History stack</li>"
         "<li>Adjustments: Auto-Level, Black & White, Brightness/Contrast, Hue/Saturation, Invert Colors, Invert Alpha, Posterize, Sepia, Temperature/Tint</li>"

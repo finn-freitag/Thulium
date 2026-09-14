@@ -11,7 +11,7 @@ struct Metadata {
     QString copyright;
     QString description;
     QString creationDate;
-    QString software = "Paint.NET Clone";
+    QString software = "Thulium";
 
     bool isEmpty() const {
         return title.trimmed().isEmpty() &&

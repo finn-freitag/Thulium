@@ -64,7 +64,7 @@ bool ImageIO::saveDocument(const Document& doc, const QString& filePath, QString
 
 QString ImageIO::openFileFilter() {
     return "Supported Images (*.pdn *.png *.jpg *.jpeg *.bmp *.gif *.webp);;"
-           "Paint.NET (*.pdn);;"
+           "Thulium / Paint.NET (*.pdn);;"
            "PNG (*.png);;"
            "JPEG (*.jpg *.jpeg);;"
            "Bitmap (*.bmp);;"
@@ -74,7 +74,7 @@ QString ImageIO::openFileFilter() {
 }
 
 QString ImageIO::saveFileFilter() {
-    return "Paint.NET (*.pdn);;"
+    return "Thulium / Paint.NET (*.pdn);;"
            "PNG (*.png);;"
            "JPEG (*.jpg *.jpeg);;"
            "Bitmap (*.bmp);;"

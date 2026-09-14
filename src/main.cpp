@@ -3,8 +3,8 @@
 
 int main(int argc, char* argv[]) {
     QApplication app(argc, argv);
-    app.setApplicationName("Paint.NET Clone");
-    app.setOrganizationName("PaintNetClone");
+    app.setApplicationName("Thulium");
+    app.setOrganizationName("Thulium");
     app.setApplicationVersion("1.0.0");
 
     pdn::MainWindow window;
