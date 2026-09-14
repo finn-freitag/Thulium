@@ -270,6 +270,15 @@ NewImageDialog::NewImageDialog(QWidget* parent) : QDialog(parent) {
     form->addRow("Width (pixels):", m_widthSpin);
     form->addRow("Height (pixels):", m_heightSpin);
 
+    m_whiteRadio = new QRadioButton("White", this);
+    m_transparentRadio = new QRadioButton("Transparent", this);
+    m_whiteRadio->setChecked(true);
+    QHBoxLayout* bgLayout = new QHBoxLayout();
+    bgLayout->addWidget(m_whiteRadio);
+    bgLayout->addWidget(m_transparentRadio);
+    bgLayout->addStretch();
+    form->addRow("Background:", bgLayout);
+
     m_presetCombo->setCurrentIndex(selectIndex);
 
     connect(m_presetCombo, QOverload<int>::of(&QComboBox::currentIndexChanged), this, &NewImageDialog::onPresetChanged);
@@ -298,6 +307,9 @@ NewImageDialog::NewImageDialog(QWidget* parent) : QDialog(parent) {
 
 int NewImageDialog::imageWidth() const { return m_widthSpin->value(); }
 int NewImageDialog::imageHeight() const { return m_heightSpin->value(); }
+bool NewImageDialog::isTransparentBackground() const {
+    return m_transparentRadio && m_transparentRadio->isChecked();
+}
 
 void NewImageDialog::onPresetChanged(int index) {
     QVariant data = m_presetCombo->itemData(index);

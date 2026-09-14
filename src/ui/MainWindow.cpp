@@ -303,10 +303,10 @@ bool MainWindow::closeAllDocuments() {
     return true;
 }
 
-void MainWindow::newDocument(int width, int height) {
+void MainWindow::newDocument(int width, int height, bool transparentBackground) {
     clearLastCopied();
 
-    auto doc = std::make_shared<Document>(width, height);
+    auto doc = std::make_shared<Document>(width, height, transparentBackground);
     QString title = generateUntitledTitle();
     doc->setTitle(title);
 
@@ -634,7 +634,7 @@ void MainWindow::updateSelectionStatus() {
 void MainWindow::onNew() {
     NewImageDialog dlg(this);
     if (dlg.exec() == QDialog::Accepted) {
-        newDocument(dlg.imageWidth(), dlg.imageHeight());
+        newDocument(dlg.imageWidth(), dlg.imageHeight(), dlg.isTransparentBackground());
     }
 }
 

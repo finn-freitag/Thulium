@@ -15,7 +15,9 @@
 #include "../src/tools/ShapeTools.h"
 #include "../src/ui/ColorsDock.h"
 #include "../src/ui/CanvasView.h"
+#include "../src/ui/ToolOptionsBar.h"
 #include "../src/ui/MainWindow.h"
+#include "../src/ui/Dialogs.h"
 
 int main(int argc, char* argv[]) {
     int fakeArgc = 1;
@@ -1071,6 +1073,279 @@ int main(int argc, char* argv[]) {
         assert(canvas.panOffset().y() == 300.0);
 
         std::cout << "  Passed: Image cannot scroll off viewbox; borders clamp at viewbox center across all 4 directions!" << std::endl;
+    }
+
+    // Test 15: Paintbrush constant alpha stroke and second stroke compositing
+    {
+        std::cout << "Test 15: Paintbrush constant alpha stroke..." << std::endl;
+        auto doc = std::make_shared<pdn::Document>(100, 100);
+        auto layer = doc->activeLayer();
+        layer->clear(); // Transparent background
+
+        pdn::ToolManager toolMgr;
+        toolMgr.setDocument(doc.get());
+        toolMgr.setActiveTool(pdn::ToolType::Paintbrush);
+        auto brushTool = std::dynamic_pointer_cast<pdn::PaintbrushTool>(toolMgr.activeTool());
+        assert(brushTool != nullptr);
+
+        toolMgr.context().brushWidth = 10;
+        toolMgr.context().antiAliasing = false; // Disable AA for crisp interior checks
+        toolMgr.context().primaryColor = QColor(255, 0, 0, 100); // 100 alpha red
+
+        // Start Stroke 1: Draw a loop crossing back over (30, 30)
+        brushTool->mousePress(nullptr, doc.get(), QPointF(30, 30), toolMgr.context());
+        // Simulating closely-spaced move events
+        for (int x = 31; x <= 70; ++x) {
+            brushTool->mouseMove(nullptr, doc.get(), QPointF(x, 30), toolMgr.context());
+        }
+        for (int y = 31; y <= 70; ++y) {
+            brushTool->mouseMove(nullptr, doc.get(), QPointF(70, y), toolMgr.context());
+        }
+        for (int x = 69; x >= 30; --x) {
+            brushTool->mouseMove(nullptr, doc.get(), QPointF(x, 70), toolMgr.context());
+        }
+        // Cross back over (30, 30) up to (30, 20)
+        for (int y = 69; y >= 20; --y) {
+            brushTool->mouseMove(nullptr, doc.get(), QPointF(30, y), toolMgr.context());
+        }
+
+        // Verify that throughout Stroke 1, no pixel in the entire image has alpha > 100!
+        // (If self-overlap bug occurred, alpha would have accumulated to 255)
+        int maxAlpha = 0;
+        for (int y = 0; y < 100; ++y) {
+            for (int x = 0; x < 100; ++x) {
+                uint32_t px = layer->scanLine(y)[x];
+                int a = (px >> 24) & 0xFF;
+                if (a > maxAlpha) maxAlpha = a;
+            }
+        }
+        assert(maxAlpha == 100);
+
+        // Verify the crossing point (30, 30) has EXACTLY alpha 100 and pure red (255, 0, 0)
+        uint32_t crossPx = layer->scanLine(30)[30];
+        assert(((crossPx >> 24) & 0xFF) == 100);
+        assert(((crossPx >> 16) & 0xFF) == 255);
+        assert(((crossPx >> 8) & 0xFF) == 0);
+        assert((crossPx & 0xFF) == 0);
+
+        // Finish Stroke 1
+        brushTool->mouseRelease(nullptr, doc.get(), QPointF(30, 20), toolMgr.context());
+
+        // Now draw Stroke 2 on top: crossing over (30, 30) with semi-transparent blue (alpha 100)
+        toolMgr.context().primaryColor = QColor(0, 0, 255, 100);
+        brushTool->mousePress(nullptr, doc.get(), QPointF(10, 30), toolMgr.context());
+        for (int x = 11; x <= 50; ++x) {
+            brushTool->mouseMove(nullptr, doc.get(), QPointF(x, 30), toolMgr.context());
+        }
+        brushTool->mouseRelease(nullptr, doc.get(), QPointF(50, 30), toolMgr.context());
+
+        // At (15, 30), only Stroke 2 was drawn -> alpha should be 100, blue
+        uint32_t stroke2OnlyPx = layer->scanLine(30)[15];
+        assert(((stroke2OnlyPx >> 24) & 0xFF) == 100);
+        assert(((stroke2OnlyPx >> 16) & 0xFF) == 0);
+        assert((stroke2OnlyPx & 0xFF) == 255);
+
+        // At (30, 30), Stroke 2 painted ON TOP OF Stroke 1!
+        // Alpha must have accumulated across the two distinct strokes:
+        // Expected alpha: 100 + 100 * (255 - 100) / 255 ~= 160
+        uint32_t blendedPx = layer->scanLine(30)[30];
+        int blendedAlpha = (blendedPx >> 24) & 0xFF;
+        assert(blendedAlpha > 150 && blendedAlpha < 170);
+
+        // Verify Undo:
+        // Undo Stroke 2 -> (30, 30) returns to alpha 100, (15, 30) returns to 0
+        doc->undoStack()->undo();
+        assert(((layer->scanLine(30)[30] >> 24) & 0xFF) == 100);
+        assert(((layer->scanLine(30)[15] >> 24) & 0xFF) == 0);
+
+        // Undo Stroke 1 -> (30, 30) returns to 0
+        doc->undoStack()->undo();
+        assert(((layer->scanLine(30)[30] >> 24) & 0xFF) == 0);
+
+        // Redo Stroke 1
+        doc->undoStack()->redo();
+        assert(((layer->scanLine(30)[30] >> 24) & 0xFF) == 100);
+
+        // Redo Stroke 2
+        doc->undoStack()->redo();
+        assert(((layer->scanLine(30)[30] >> 24) & 0xFF) == blendedAlpha);
+
+        std::cout << "  Passed: Paintbrush maintains constant alpha during stroke and composites next stroke on top!" << std::endl;
+    }
+
+    // Test 16: Composition mode switch (Draw Over vs Overwrite) and border antialiasing replacement
+    {
+        std::cout << "Test 16: Composition mode switch and Overwrite mode..." << std::endl;
+        pdn::ToolManager toolMgr;
+        pdn::ToolOptionsBar bar(&toolMgr);
+
+        // 1. Verify UI button next to Smooth/Pixelated exists and toggles mode
+        auto compBtn = bar.compositionModeButton();
+        assert(compBtn != nullptr);
+        assert(compBtn->text() == "Draw Over");
+        assert(toolMgr.context().compositionMode == pdn::ColorCompositionMode::DrawOver);
+
+        compBtn->click();
+        assert(compBtn->text() == "Overwrite");
+        assert(toolMgr.context().compositionMode == pdn::ColorCompositionMode::Overwrite);
+
+        compBtn->click();
+        assert(compBtn->text() == "Draw Over");
+        assert(toolMgr.context().compositionMode == pdn::ColorCompositionMode::DrawOver);
+
+        // 2. Test Overwrite mode with transparent color replacing opaque layer
+        auto doc = std::make_shared<pdn::Document>(100, 100);
+        auto layer = doc->activeLayer();
+        layer->fill(Qt::white); // 0xFFFFFFFF
+        toolMgr.setDocument(doc.get());
+        toolMgr.setActiveTool(pdn::ToolType::Paintbrush);
+        auto brushTool = std::dynamic_pointer_cast<pdn::PaintbrushTool>(toolMgr.activeTool());
+        assert(brushTool != nullptr);
+
+        toolMgr.context().brushWidth = 20;
+        toolMgr.context().antiAliasing = true;
+        toolMgr.context().compositionMode = pdn::ColorCompositionMode::Overwrite;
+        toolMgr.context().primaryColor = QColor(0, 0, 0, 0); // Fully transparent
+
+        brushTool->mousePress(nullptr, doc.get(), QPointF(20, 20), toolMgr.context());
+        for (int x = 21; x <= 80; ++x) {
+            brushTool->mouseMove(nullptr, doc.get(), QPointF(x, 20 + (x - 20) * 0.5), toolMgr.context());
+        }
+        brushTool->mouseRelease(nullptr, doc.get(), QPointF(80, 50), toolMgr.context());
+
+        // Center of stroke (50, 35) must be completely transparent (white replaced by transparent color)
+        assert(layer->scanLine(35)[50] == 0x00000000);
+
+        // Far outside stroke (50, 10) must still be fully white
+        assert(layer->scanLine(10)[50] == 0xFFFFFFFF);
+
+        // Check antialiased border (feathered region around y = 50 +/- 10):
+        // There must be pixels where alpha is partially replaced by intensity (0 < alpha < 255)
+        bool foundPartialAlpha = false;
+        for (int y = 20; y <= 50; ++y) {
+            uint32_t px = layer->scanLine(y)[50];
+            int a = (px >> 24) & 0xFF;
+            if (a > 0 && a < 255) {
+                foundPartialAlpha = true;
+                assert(((px >> 16) & 0xFF) == 255);
+                assert(((px >> 8) & 0xFF) == 255);
+                assert((px & 0xFF) == 255);
+            }
+        }
+        assert(foundPartialAlpha);
+
+        // 3. Test Overwrite mode with semi-transparent color (alpha 120 red) replacing white
+        layer->fill(Qt::white);
+        toolMgr.context().primaryColor = QColor(255, 0, 0, 120);
+
+        brushTool->mousePress(nullptr, doc.get(), QPointF(20, 50), toolMgr.context());
+        for (int x = 21; x <= 80; ++x) {
+            brushTool->mouseMove(nullptr, doc.get(), QPointF(x, 50), toolMgr.context());
+        }
+        brushTool->mouseRelease(nullptr, doc.get(), QPointF(80, 50), toolMgr.context());
+
+        // Center of stroke: in Overwrite mode, white is replaced by red (120 alpha)
+        uint32_t centerPx = layer->scanLine(50)[50];
+        assert(((centerPx >> 24) & 0xFF) == 120);
+        assert(((centerPx >> 16) & 0xFF) == 255);
+        assert(((centerPx >> 8) & 0xFF) == 0);
+        assert((centerPx & 0xFF) == 0);
+
+        // 4. In contrast, in DrawOver mode, semi-transparent red drawn on white remains alpha 255 (pink)
+        layer->fill(Qt::white);
+        toolMgr.context().compositionMode = pdn::ColorCompositionMode::DrawOver;
+        brushTool->mousePress(nullptr, doc.get(), QPointF(20, 50), toolMgr.context());
+        for (int x = 21; x <= 80; ++x) {
+            brushTool->mouseMove(nullptr, doc.get(), QPointF(x, 50), toolMgr.context());
+        }
+        brushTool->mouseRelease(nullptr, doc.get(), QPointF(80, 50), toolMgr.context());
+
+        uint32_t drawOverPx = layer->scanLine(50)[50];
+        assert(((drawOverPx >> 24) & 0xFF) == 255); // Alpha stays 255 in DrawOver mode!
+        assert(((drawOverPx >> 8) & 0xFF) > 0);     // Green is non-zero (pink composite)
+
+        std::cout << "  Passed: Composition mode switch and Overwrite mode (with antialiased border replacement) work properly!" << std::endl;
+    }
+
+    // Test 17: NewImageDialog background fill options and transparent initial background
+    {
+        std::cout << "Test 17: NewImageDialog background options..." << std::endl;
+        pdn::NewImageDialog dlg;
+        assert(dlg.whiteRadioButton() != nullptr);
+        assert(dlg.transparentRadioButton() != nullptr);
+        assert(dlg.whiteRadioButton()->isChecked());
+        assert(!dlg.transparentRadioButton()->isChecked());
+        assert(!dlg.isTransparentBackground());
+
+        // Toggle to transparent
+        dlg.transparentRadioButton()->setChecked(true);
+        assert(dlg.isTransparentBackground());
+
+        // Test Document creation with transparentBackground = true
+        auto transDoc = std::make_shared<pdn::Document>(50, 50, true);
+        assert(transDoc->activeLayer() != nullptr);
+        for (int y = 0; y < 50; ++y) {
+            for (int x = 0; x < 50; ++x) {
+                assert(transDoc->activeLayer()->scanLine(y)[x] == 0x00000000);
+            }
+        }
+
+        // Test Document creation with transparentBackground = false (default)
+        auto whiteDoc = std::make_shared<pdn::Document>(50, 50, false);
+        assert(whiteDoc->activeLayer() != nullptr);
+        for (int y = 0; y < 50; ++y) {
+            for (int x = 0; x < 50; ++x) {
+                assert(whiteDoc->activeLayer()->scanLine(y)[x] == 0xFFFFFFFF);
+            }
+        }
+
+        std::cout << "  Passed: NewImageDialog background radio buttons and transparent document creation work properly!" << std::endl;
+    }
+
+    // Test 18: Color preview in color picker with transparent checkerboard background
+    {
+        std::cout << "Test 18: ColorPreviewBox transparency checkerboard..." << std::endl;
+        pdn::ToolManager toolMgr;
+        pdn::ColorsDock dock(&toolMgr);
+        assert(dock.primaryBox() != nullptr);
+        assert(dock.secondaryBox() != nullptr);
+
+        // 1. Solid color (alpha 255)
+        dock.primaryBox()->setColor(QColor(255, 0, 0, 255), true);
+        QPixmap solidPix(36, 36);
+        dock.primaryBox()->render(&solidPix);
+        QImage solidImg = solidPix.toImage();
+        // Inner swatch pixels must be pure solid red, no checkerboard visible
+        assert(solidImg.pixelColor(4, 4) == QColor(255, 0, 0));
+        assert(solidImg.pixelColor(8, 4) == QColor(255, 0, 0));
+
+        // 2. Fully transparent color (alpha 0)
+        dock.primaryBox()->setColor(QColor(0, 0, 0, 0), true);
+        QPixmap transPix(36, 36);
+        dock.primaryBox()->render(&transPix);
+        QImage transImg = transPix.toImage();
+        // Inner swatch pixels must reveal the checkerboard (white and #cccccc)
+        assert(transImg.pixelColor(4, 4) == QColor(255, 255, 255));
+        assert(transImg.pixelColor(8, 4) == QColor(204, 204, 204));
+
+        // 3. Semi-transparent color (alpha 128)
+        dock.primaryBox()->setColor(QColor(255, 0, 0, 128), true);
+        QPixmap semiPix(36, 36);
+        dock.primaryBox()->render(&semiPix);
+        QImage semiImg = semiPix.toImage();
+        // Because of blending over checkerboard, pixels at (4,4) and (8,4) must differ and show red tint
+        assert(semiImg.pixelColor(4, 4).red() > 200);
+        assert(semiImg.pixelColor(8, 4).red() > 200);
+        assert(semiImg.pixelColor(4, 4) != semiImg.pixelColor(8, 4));
+
+        // 4. Alpha slider in ColorsDock updates primary box
+        toolMgr.context().primaryColor = QColor(0, 255, 0, 255);
+        dock.setEditingPrimary(true);
+        toolMgr.context().primaryColor.setAlpha(0);
+        emit toolMgr.contextChanged();
+        assert(dock.primaryBox()->color().alpha() == 0);
+
+        std::cout << "  Passed: ColorPreviewBox displays transparency checkerboard properly!" << std::endl;
     }
 
     std::cout << "=== All Tests Passed Successfully! ===" << std::endl;

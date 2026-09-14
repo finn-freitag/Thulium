@@ -20,6 +20,8 @@ public slots:
     void updateForTool(ToolType type);
 
     QSpinBox* brushWidthSpin() const { return m_brushWidthSpin; }
+    QToolButton* antialiasButton() const { return m_antialiasBtn; }
+    QToolButton* compositionModeButton() const { return m_compositionModeBtn; }
 
 private:
     void setupWidgets();
@@ -32,6 +34,9 @@ private:
 
     // Antialias
     QToolButton* m_antialiasBtn;
+
+    // Composition mode (Draw Over vs Overwrite)
+    QToolButton* m_compositionModeBtn;
 
     // Selection mode
     QLabel* m_selectionModeLabel;

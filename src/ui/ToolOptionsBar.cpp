@@ -35,6 +35,23 @@ void ToolOptionsBar::setupWidgets() {
         m_antialiasBtn->setText(checked ? "Smooth" : "Pixelated");
     });
 
+    // 2b. Composition mode (Draw Over vs Overwrite)
+    m_compositionModeBtn = new QToolButton(this);
+    m_compositionModeBtn->setFocusPolicy(Qt::NoFocus);
+    bool isOverwrite = (m_toolMgr->context().compositionMode == ColorCompositionMode::Overwrite);
+    m_compositionModeBtn->setText(isOverwrite ? "Overwrite" : "Draw Over");
+    m_compositionModeBtn->setCheckable(true);
+    m_compositionModeBtn->setChecked(isOverwrite);
+    m_compositionModeBtn->setToolTip(isOverwrite ? "Color Composition: Overwrite (replace colors below)"
+                                                 : "Color Composition: Draw Over (draw on top of colors below)");
+    connect(m_compositionModeBtn, &QToolButton::toggled, this, [this](bool checked) {
+        m_toolMgr->context().compositionMode = checked ? ColorCompositionMode::Overwrite : ColorCompositionMode::DrawOver;
+        m_compositionModeBtn->setText(checked ? "Overwrite" : "Draw Over");
+        m_compositionModeBtn->setToolTip(checked ? "Color Composition: Overwrite (replace colors below)"
+                                                 : "Color Composition: Draw Over (draw on top of colors below)");
+        m_toolMgr->context().notifyChanged();
+    });
+
     // 3. Selection mode
     m_selectionModeLabel = new QLabel(" Mode: ", this);
     m_selectionModeCombo = new QComboBox(this);
@@ -156,6 +173,7 @@ void ToolOptionsBar::setupWidgets() {
     addWidget(m_brushWidthLabel);
     addWidget(m_brushWidthSpin);
     addWidget(m_antialiasBtn);
+    addWidget(m_compositionModeBtn);
     addSeparator();
     addWidget(m_selectionModeLabel);
     addWidget(m_selectionModeCombo);
@@ -186,6 +204,7 @@ void ToolOptionsBar::updateForTool(ToolType type) {
     m_brushWidthLabel->setVisible(isBrush);
     m_brushWidthSpin->setVisible(isBrush);
     m_antialiasBtn->setVisible(isBrush);
+    m_compositionModeBtn->setVisible(isBrush);
 
     bool isSelection = (type == ToolType::RectangleSelect || type == ToolType::EllipseSelect ||
                         type == ToolType::LassoSelect || type == ToolType::MagicWand);

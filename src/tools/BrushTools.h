@@ -14,15 +14,21 @@ public:
     QString shortcut() const override { return "B"; }
     QCursor cursor() const override { return Qt::CrossCursor; }
 
+    void deactivate(Document* doc, ToolContext& ctx) override;
+
     void mousePress(QMouseEvent* event, Document* doc, const QPointF& docPos, ToolContext& ctx) override;
     void mouseMove(QMouseEvent* event, Document* doc, const QPointF& docPos, ToolContext& ctx) override;
     void mouseRelease(QMouseEvent* event, Document* doc, const QPointF& docPos, ToolContext& ctx) override;
 
 private:
+    void applyStrokeToLayer(Document* doc, const QRect& dirtyRect);
+
     QPointF m_lastPos;
     QImage m_undoSnapshot;
+    QImage m_strokeImage;
     bool m_drawing = false;
     QColor m_activeColor;
+    ColorCompositionMode m_compositionMode = ColorCompositionMode::DrawOver;
 };
 
 class PencilTool : public ITool {

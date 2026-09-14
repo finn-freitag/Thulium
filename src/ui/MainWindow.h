@@ -25,7 +25,7 @@ public:
     ~MainWindow() override = default;
 
     bool openFile(const QString& filePath);
-    void newDocument(int width, int height);
+    void newDocument(int width, int height, bool transparentBackground = false);
 
     // Multi-document management
     int addDocument(std::shared_ptr<Document> doc, bool makeActive = true);

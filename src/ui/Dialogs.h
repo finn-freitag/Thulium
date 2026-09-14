@@ -3,6 +3,7 @@
 #include <QDialog>
 #include <QLineEdit>
 #include <QCheckBox>
+#include <QRadioButton>
 #include <QSlider>
 #include <QSpinBox>
 #include <QComboBox>
@@ -106,6 +107,9 @@ public:
 
     int imageWidth() const;
     int imageHeight() const;
+    bool isTransparentBackground() const;
+    QRadioButton* whiteRadioButton() const { return m_whiteRadio; }
+    QRadioButton* transparentRadioButton() const { return m_transparentRadio; }
 
 private slots:
     void onPresetChanged(int index);
@@ -114,6 +118,8 @@ private:
     QSpinBox* m_widthSpin;
     QSpinBox* m_heightSpin;
     QComboBox* m_presetCombo;
+    QRadioButton* m_whiteRadio;
+    QRadioButton* m_transparentRadio;
 };
 
 class MetadataDialog : public QDialog {

@@ -190,6 +190,48 @@ void ColorWheelWidget::paintEvent(QPaintEvent* /*event*/) {
     p.drawLine(barLeft - 2, handleY + 1, barLeft + barWidth + 2, handleY + 1);
 }
 
+// --- ColorPreviewBox ---
+ColorPreviewBox::ColorPreviewBox(QWidget* parent) : QPushButton(parent) {
+}
+
+void ColorPreviewBox::setColor(const QColor& color, bool isSelected) {
+    if (m_color != color || m_isSelected != isSelected) {
+        m_color = color;
+        m_isSelected = isSelected;
+        update();
+    }
+}
+
+void ColorPreviewBox::paintEvent(QPaintEvent* /*event*/) {
+    QPainter p(this);
+    QRect r = rect();
+
+    // 1. Draw outer border / frame
+    if (m_isSelected) {
+        p.fillRect(r, QColor(0, 120, 215)); // Highlight border for selected
+    } else {
+        p.fillRect(r, QColor(136, 136, 136)); // Normal border for inactive
+    }
+
+    int borderWidth = m_isSelected ? 3 : 1;
+    QRect swatchRect = r.adjusted(borderWidth, borderWidth, -borderWidth, -borderWidth);
+    if (!swatchRect.isValid()) return;
+
+    // 2. Draw checkerboard transparency pattern in swatchRect
+    int checkSize = 4;
+    for (int y = swatchRect.top(); y <= swatchRect.bottom(); y += checkSize) {
+        for (int x = swatchRect.left(); x <= swatchRect.right(); x += checkSize) {
+            int tileW = std::min(checkSize, swatchRect.right() - x + 1);
+            int tileH = std::min(checkSize, swatchRect.bottom() - y + 1);
+            bool isDark = (((x - swatchRect.left()) / checkSize) + ((y - swatchRect.top()) / checkSize)) % 2 == 1;
+            p.fillRect(QRect(x, y, tileW, tileH), isDark ? QColor(204, 204, 204) : QColor(255, 255, 255));
+        }
+    }
+
+    // 3. Fill with color (alpha-blended over the checkerboard)
+    p.fillRect(swatchRect, m_color);
+}
+
 // --- ColorsDock ---
 ColorsDock::ColorsDock(ToolManager* toolMgr, QWidget* parent)
     : QDockWidget("Colors", parent), m_toolMgr(toolMgr) {
@@ -208,14 +250,14 @@ void ColorsDock::setupUI() {
 
     // Top: Primary & Secondary color swatches + Swap & Default buttons
     QHBoxLayout* topLayout = new QHBoxLayout();
-    m_primaryBox = new QPushButton(container);
+    m_primaryBox = new ColorPreviewBox(container);
     m_primaryBox->setFixedSize(36, 36);
     m_primaryBox->setToolTip("Primary Color (Click to select for editing)");
     connect(m_primaryBox, &QPushButton::clicked, this, [this]() {
         setEditingPrimary(true);
     });
 
-    m_secondaryBox = new QPushButton(container);
+    m_secondaryBox = new ColorPreviewBox(container);
     m_secondaryBox->setFixedSize(36, 36);
     m_secondaryBox->setToolTip("Secondary Color (Click to select for editing)");
     connect(m_secondaryBox, &QPushButton::clicked, this, [this]() {
@@ -358,10 +400,8 @@ void ColorsDock::updateUIFromActiveColor() {
     QColor pri = m_toolMgr->context().primaryColor;
     QColor sec = m_toolMgr->context().secondaryColor;
 
-    m_primaryBox->setStyleSheet(QString("background-color: %1; border: %2 solid #0078d7;")
-                                    .arg(pri.name()).arg(m_editingPrimary ? "3px" : "1px"));
-    m_secondaryBox->setStyleSheet(QString("background-color: %1; border: %2 solid #0078d7;")
-                                      .arg(sec.name()).arg(!m_editingPrimary ? "3px" : "1px"));
+    m_primaryBox->setColor(pri, m_editingPrimary);
+    m_secondaryBox->setColor(sec, !m_editingPrimary);
 
     QColor active = activeTargetColor();
     m_wheel->setColor(active);
@@ -411,6 +451,7 @@ void ColorsDock::onHsvChanged() {
 void ColorsDock::onAlphaChanged(int val) {
     if (m_updating) return;
     activeTargetColor().setAlpha(val);
+    updateUIFromActiveColor();
     emit m_toolMgr->contextChanged();
 }
 

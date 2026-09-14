@@ -7,6 +7,76 @@
 namespace pdn {
 
 // --- PaintbrushTool ---
+void PaintbrushTool::deactivate(Document* doc, ToolContext& ctx) {
+    if (m_drawing && doc) {
+        mouseRelease(nullptr, doc, m_lastPos, ctx);
+    }
+}
+
+void PaintbrushTool::applyStrokeToLayer(Document* doc, const QRect& dirtyRect) {
+    auto layer = doc->activeLayer();
+    if (!layer || dirtyRect.isEmpty()) return;
+
+    QRect clampedDirty = dirtyRect.intersected(layer->image().rect());
+    if (clampedDirty.isEmpty()) return;
+
+    bool hasSelection = !doc->selection().isEmpty();
+    uint8_t opacity = static_cast<uint8_t>(m_activeColor.alpha());
+
+    int yTop = clampedDirty.top();
+    int yBottom = clampedDirty.bottom();
+    int xLeft = clampedDirty.left();
+    int xRight = clampedDirty.right();
+
+    uint32_t A_user = opacity;
+    uint32_t R_user = m_activeColor.red();
+    uint32_t G_user = m_activeColor.green();
+    uint32_t B_user = m_activeColor.blue();
+
+    for (int y = yTop; y <= yBottom; ++y) {
+        uint32_t* dstLine = layer->scanLine(y);
+        const uint32_t* undoLine = reinterpret_cast<const uint32_t*>(m_undoSnapshot.constScanLine(y));
+        const uint32_t* strokeLine = reinterpret_cast<const uint32_t*>(m_strokeImage.constScanLine(y));
+
+        for (int x = xLeft; x <= xRight; ++x) {
+            if (hasSelection && !doc->selection().containsPixel(x, y)) {
+                continue;
+            }
+
+            uint32_t bg = undoLine[x];
+            uint32_t stroke = strokeLine[x];
+
+            if (m_compositionMode == ColorCompositionMode::DrawOver) {
+                dstLine[x] = blendPixel(BlendMode::Normal, bg, stroke, opacity);
+            } else { // ColorCompositionMode::Overwrite
+                uint32_t C = (stroke >> 24) & 0xFF;
+                if (C == 0) {
+                    dstLine[x] = bg;
+                } else {
+                    uint32_t A_dst = (bg >> 24) & 0xFF;
+                    uint32_t R_dst = (bg >> 16) & 0xFF;
+                    uint32_t G_dst = (bg >> 8) & 0xFF;
+                    uint32_t B_dst = bg & 0xFF;
+
+                    uint32_t termDst = (255 - C) * A_dst;
+                    uint32_t termUser = C * A_user;
+                    uint32_t totalWeight = termDst + termUser;
+                    uint32_t outA = (totalWeight + 127) / 255;
+
+                    if (outA == 0) {
+                        dstLine[x] = 0;
+                    } else {
+                        uint32_t outR = (termDst * R_dst + termUser * R_user + totalWeight / 2) / totalWeight;
+                        uint32_t outG = (termDst * G_dst + termUser * G_user + totalWeight / 2) / totalWeight;
+                        uint32_t outB = (termDst * B_dst + termUser * B_user + totalWeight / 2) / totalWeight;
+                        dstLine[x] = (outA << 24) | ((outR & 0xFF) << 16) | ((outG & 0xFF) << 8) | (outB & 0xFF);
+                    }
+                }
+            }
+        }
+    }
+}
+
 void PaintbrushTool::mousePress(QMouseEvent* event, Document* doc, const QPointF& docPos, ToolContext& ctx) {
     auto layer = doc->activeLayer();
     if (!layer || !layer->isVisible()) return;
@@ -14,16 +84,28 @@ void PaintbrushTool::mousePress(QMouseEvent* event, Document* doc, const QPointF
     m_undoSnapshot = layer->image().copy();
     m_drawing = true;
     m_lastPos = docPos;
-    m_activeColor = (event->button() == Qt::RightButton) ? ctx.secondaryColor : ctx.primaryColor;
+    m_activeColor = (event && event->button() == Qt::RightButton) ? ctx.secondaryColor : ctx.primaryColor;
+    m_compositionMode = ctx.compositionMode;
 
-    QPainter p(&layer->image());
+    m_strokeImage = QImage(layer->image().size(), QImage::Format_ARGB32);
+    m_strokeImage.fill(Qt::transparent);
+
+    QColor strokeColor = m_activeColor;
+    strokeColor.setAlpha(255);
+
+    QPainter pStroke(&m_strokeImage);
     if (!doc->selection().isEmpty()) {
-        p.setClipPath(doc->selection().path());
+        pStroke.setClipPath(doc->selection().path());
     }
-    p.setRenderHint(QPainter::Antialiasing, ctx.antiAliasing);
-    p.setPen(QPen(m_activeColor, ctx.brushWidth, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
-    p.drawPoint(docPos);
-    p.end();
+    pStroke.setRenderHint(QPainter::Antialiasing, ctx.antiAliasing);
+    pStroke.setPen(QPen(strokeColor, ctx.brushWidth, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
+    pStroke.drawPoint(docPos);
+    pStroke.end();
+
+    int pad = static_cast<int>(std::ceil(ctx.brushWidth / 2.0)) + 4;
+    QRectF dirtyF(docPos, docPos);
+    dirtyF = dirtyF.adjusted(-pad, -pad, pad, pad);
+    applyStrokeToLayer(doc, dirtyF.toAlignedRect());
 
     emit doc->documentChanged();
 }
@@ -33,14 +115,22 @@ void PaintbrushTool::mouseMove(QMouseEvent* /*event*/, Document* doc, const QPoi
     auto layer = doc->activeLayer();
     if (!layer) return;
 
-    QPainter p(&layer->image());
+    QColor strokeColor = m_activeColor;
+    strokeColor.setAlpha(255);
+
+    QPainter pStroke(&m_strokeImage);
     if (!doc->selection().isEmpty()) {
-        p.setClipPath(doc->selection().path());
+        pStroke.setClipPath(doc->selection().path());
     }
-    p.setRenderHint(QPainter::Antialiasing, ctx.antiAliasing);
-    p.setPen(QPen(m_activeColor, ctx.brushWidth, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
-    p.drawLine(m_lastPos, docPos);
-    p.end();
+    pStroke.setRenderHint(QPainter::Antialiasing, ctx.antiAliasing);
+    pStroke.setPen(QPen(strokeColor, ctx.brushWidth, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
+    pStroke.drawLine(m_lastPos, docPos);
+    pStroke.end();
+
+    int pad = static_cast<int>(std::ceil(ctx.brushWidth / 2.0)) + 4;
+    QRectF dirtyF(m_lastPos, docPos);
+    dirtyF = dirtyF.normalized().adjusted(-pad, -pad, pad, pad);
+    applyStrokeToLayer(doc, dirtyF.toAlignedRect());
 
     m_lastPos = docPos;
     emit doc->documentChanged();
@@ -50,6 +140,7 @@ void PaintbrushTool::mouseRelease(QMouseEvent* /*event*/, Document* doc, const Q
     if (!m_drawing) return;
     m_drawing = false;
     doc->undoStack()->push(new LayerBitmapUndoCommand(doc, doc->activeLayerIndex(), m_undoSnapshot, "Paintbrush"));
+    m_strokeImage = QImage();
 }
 
 // --- PencilTool ---

@@ -7,9 +7,16 @@
 namespace pdn {
 
 Document::Document(int width, int height, QObject* parent)
+    : Document(width, height, false, parent) {
+}
+
+Document::Document(int width, int height, bool transparentBackground, QObject* parent)
     : QObject(parent), m_width(width), m_height(height), m_selection(width, height) {
     // Default background layer
     auto bg = std::make_shared<Layer>(width, height, "Background", true);
+    if (transparentBackground) {
+        bg->clear();
+    }
     m_layers.append(bg);
     m_activeLayerIndex = 0;
 }

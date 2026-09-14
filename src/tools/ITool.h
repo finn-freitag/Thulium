@@ -58,6 +58,11 @@ enum class GradientMode {
     Conical
 };
 
+enum class ColorCompositionMode {
+    DrawOver,
+    Overwrite
+};
+
 struct ToolContext {
     QColor primaryColor = Qt::black;
     QColor secondaryColor = Qt::white;
@@ -65,6 +70,7 @@ struct ToolContext {
     int brushWidth = 2;
     int tolerance = 50; // 0..100%
     bool antiAliasing = true;
+    ColorCompositionMode compositionMode = ColorCompositionMode::DrawOver;
     SelectionCombineMode selectionCombineMode = SelectionCombineMode::Replace;
     ShapeType shapeType = ShapeType::Rectangle;
     FillMode fillMode = FillMode::OutlineOnly;

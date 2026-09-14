@@ -16,6 +16,7 @@ class Document : public QObject {
     Q_OBJECT
 public:
     Document(int width, int height, QObject* parent = nullptr);
+    Document(int width, int height, bool transparentBackground, QObject* parent = nullptr);
     Document(const QImage& initialImage, QObject* parent = nullptr);
     ~Document() override = default;
 

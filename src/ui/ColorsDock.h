@@ -41,6 +41,23 @@ private:
     void renderWheelImage();
 };
 
+class ColorPreviewBox : public QPushButton {
+    Q_OBJECT
+public:
+    explicit ColorPreviewBox(QWidget* parent = nullptr);
+
+    void setColor(const QColor& color, bool isSelected);
+    QColor color() const { return m_color; }
+    bool isSelected() const { return m_isSelected; }
+
+protected:
+    void paintEvent(QPaintEvent* event) override;
+
+private:
+    QColor m_color = Qt::black;
+    bool m_isSelected = false;
+};
+
 class ColorsDock : public QDockWidget {
     Q_OBJECT
 public:
@@ -50,6 +67,9 @@ public:
     void setEditingPrimary(bool primary);
     QColor& activeTargetColor();
     QColor activeTargetColor() const;
+
+    ColorPreviewBox* primaryBox() const { return m_primaryBox; }
+    ColorPreviewBox* secondaryBox() const { return m_secondaryBox; }
 
 private slots:
     void onWheelColorChanged(const QColor& c);
@@ -72,8 +92,8 @@ private:
     bool m_updating = false;
 
     // Color Swatches
-    QPushButton* m_primaryBox;
-    QPushButton* m_secondaryBox;
+    ColorPreviewBox* m_primaryBox;
+    ColorPreviewBox* m_secondaryBox;
     QPushButton* m_swapBtn;
     QPushButton* m_defaultBtn;
 
