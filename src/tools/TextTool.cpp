@@ -84,6 +84,11 @@ void TextTool::keyPress(QKeyEvent* event, Document* doc, ToolContext& ctx) {
         return;
     }
 
+    if (event->key() == Qt::Key_Delete) {
+        event->accept();
+        return;
+    }
+
     QString txt = event->text();
     if (!txt.isEmpty() && txt.at(0).isPrint()) {
         m_text += txt;

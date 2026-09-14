@@ -1,11 +1,15 @@
 #include <QApplication>
+#include <QIcon>
 #include "ui/MainWindow.h"
 
 int main(int argc, char* argv[]) {
+    Q_INIT_RESOURCE(resources);
+
     QApplication app(argc, argv);
     app.setApplicationName("Thulium");
     app.setOrganizationName("Thulium");
     app.setApplicationVersion("1.0.0");
+    app.setWindowIcon(QIcon(":/icons/logo.png"));
 
     pdn::MainWindow window;
     window.show();

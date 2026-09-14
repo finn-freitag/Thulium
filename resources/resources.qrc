@@ -47,5 +47,7 @@
         <file alias="layer-move-up.svg">icons/layer-move-up.svg</file>
         <file alias="layer-move-down.svg">icons/layer-move-down.svg</file>
         <file alias="layer-properties.svg">icons/layer-properties.svg</file>
+
+        <file alias="logo.png">icons/logo.png</file>
     </qresource>
 </RCC>

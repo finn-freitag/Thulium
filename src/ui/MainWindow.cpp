@@ -27,6 +27,8 @@
 #include <QPlainTextEdit>
 #include <QSpinBox>
 #include <QDoubleSpinBox>
+#include <QAbstractSpinBox>
+#include <QComboBox>
 #include <QApplication>
 #include <QVBoxLayout>
 #include <QFileInfo>
@@ -54,6 +56,7 @@ MainWindow::MainWindow(QWidget* parent)
       m_pluginMgr(new PluginManager(this)) {
     initResources();
     setWindowTitle("Thulium");
+    setWindowIcon(QIcon(":/icons/logo.png"));
     resize(1200, 800);
     setAcceptDrops(true);
 
@@ -595,7 +598,11 @@ void MainWindow::setupDocks() {
     }
 
     for (QAction* act : findChildren<QAction*>()) {
-        act->setShortcutContext(Qt::ApplicationShortcut);
+        act->setShortcutContext(Qt::WindowShortcut);
+        m_toolsDock->addAction(act);
+        m_historyDock->addAction(act);
+        m_layersDock->addAction(act);
+        m_colorsDock->addAction(act);
     }
 }
 
@@ -1299,6 +1306,8 @@ void MainWindow::onResetWindowLocations() {
 void MainWindow::onAbout() {
     QMessageBox box(this);
     box.setWindowTitle("About Thulium");
+    box.setWindowIcon(QIcon(":/icons/logo.png"));
+    box.setIconPixmap(QPixmap(":/icons/logo.png").scaled(96, 96, Qt::KeepAspectRatio, Qt::SmoothTransformation));
     box.setTextFormat(Qt::RichText);
     box.setTextInteractionFlags(Qt::TextBrowserInteraction);
     box.setText(
@@ -1427,41 +1436,71 @@ void MainWindow::dropEvent(QDropEvent* event) {
     event->acceptProposedAction();
 }
 
+bool MainWindow::isComponentOfMainWindow(QObject* obj) const {
+    if (!obj) return false;
+    QWidget* w = qobject_cast<QWidget*>(obj);
+    if (!w) return false;
+
+    if (w == this || this->isAncestorOf(w)) {
+        return true;
+    }
+
+    const QDockWidget* docks[] = { m_toolsDock, m_historyDock, m_layersDock, m_colorsDock };
+    for (const QDockWidget* dock : docks) {
+        if (dock && (dock == w || dock->isAncestorOf(w))) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+bool MainWindow::isMainWindowActive() const {
+    QWidget* activeWin = QApplication::activeWindow();
+    if (!activeWin) return false;
+    if (activeWin == this) return true;
+
+    const QDockWidget* docks[] = { m_toolsDock, m_historyDock, m_layersDock, m_colorsDock };
+    for (const QDockWidget* dock : docks) {
+        if (dock && (activeWin == dock || dock->isAncestorOf(activeWin))) {
+            return true;
+        }
+    }
+    return false;
+}
+
 bool MainWindow::eventFilter(QObject* watched, QEvent* event) {
     if (event->type() == QEvent::KeyPress) {
         QKeyEvent* keyEvent = static_cast<QKeyEvent*>(event);
 
-        // Document navigation shortcuts: Ctrl+Tab / Ctrl+Shift+Tab / Ctrl+PageDown / Ctrl+PageUp
-        if (keyEvent->modifiers() & Qt::ControlModifier) {
-            if (keyEvent->key() == Qt::Key_Tab || keyEvent->key() == Qt::Key_PageDown) {
-                if (keyEvent->modifiers() & Qt::ShiftModifier) {
-                    previousDocument();
-                } else {
-                    nextDocument();
-                }
-                return true;
-            }
-            if (keyEvent->key() == Qt::Key_Backtab || keyEvent->key() == Qt::Key_PageUp) {
-                previousDocument();
-                return true;
-            }
-            if (keyEvent->key() == Qt::Key_W || keyEvent->key() == Qt::Key_F4) {
-                closeActiveDocument();
-                return true;
-            }
+        QWidget* watchedWidget = qobject_cast<QWidget*>(watched);
+        if (!watchedWidget) {
+            return QMainWindow::eventFilter(watched, event);
+        }
+
+        // Keybinds must only apply when MainWindow (or one of its docks) is active,
+        // and must never apply to other windows/dialogs (e.g. file save dialog).
+        if (!isMainWindowActive() || !isComponentOfMainWindow(watchedWidget)) {
+            return QMainWindow::eventFilter(watched, event);
         }
 
         // 1. If focus is inside a text input widget or line edit, allow standard typing
         QWidget* fw = QApplication::focusWidget();
         auto isTextInput = [](QObject* obj) -> bool {
-            return obj && (qobject_cast<QLineEdit*>(obj) ||
-                           qobject_cast<QTextEdit*>(obj) ||
-                           qobject_cast<QPlainTextEdit*>(obj) ||
-                           qobject_cast<QSpinBox*>(obj) ||
-                           qobject_cast<QDoubleSpinBox*>(obj));
+            if (!obj) return false;
+            if (qobject_cast<QLineEdit*>(obj) ||
+                qobject_cast<QTextEdit*>(obj) ||
+                qobject_cast<QPlainTextEdit*>(obj) ||
+                qobject_cast<QAbstractSpinBox*>(obj)) {
+                return true;
+            }
+            if (auto cb = qobject_cast<QComboBox*>(obj)) {
+                if (cb->isEditable()) return true;
+            }
+            return false;
         };
 
-        if (isTextInput(fw) || isTextInput(watched)) {
+        if (isTextInput(fw) || isTextInput(watchedWidget)) {
             return QMainWindow::eventFilter(watched, event);
         }
 
@@ -1483,12 +1522,32 @@ bool MainWindow::eventFilter(QObject* watched, QEvent* event) {
             }
         }
 
-        // 4. Try ToolManager global shortcuts (tool selection, cycling, X, D, [, ], arrows, Esc)
+        // 4. Document navigation shortcuts: Ctrl+Tab / Ctrl+Shift+Tab / Ctrl+PageDown / Ctrl+PageUp
+        if (keyEvent->modifiers() & Qt::ControlModifier) {
+            if (keyEvent->key() == Qt::Key_Tab || keyEvent->key() == Qt::Key_PageDown) {
+                if (keyEvent->modifiers() & Qt::ShiftModifier) {
+                    previousDocument();
+                } else {
+                    nextDocument();
+                }
+                return true;
+            }
+            if (keyEvent->key() == Qt::Key_Backtab || keyEvent->key() == Qt::Key_PageUp) {
+                previousDocument();
+                return true;
+            }
+            if (keyEvent->key() == Qt::Key_W || keyEvent->key() == Qt::Key_F4) {
+                closeActiveDocument();
+                return true;
+            }
+        }
+
+        // 5. Try ToolManager global shortcuts (tool selection, cycling, X, D, [, ], arrows, Esc)
         if (m_toolMgr && m_toolMgr->handleKeyPress(keyEvent)) {
             if (m_canvasView) {
                 m_canvasView->update();
             }
-            return true; // Event consumed globally!
+            return true; // Event consumed for MainWindow component!
         }
     }
 
@@ -1497,7 +1556,21 @@ bool MainWindow::eventFilter(QObject* watched, QEvent* event) {
 
 void MainWindow::keyPressEvent(QKeyEvent* event) {
     QWidget* fw = focusWidget();
-    if (fw && (qobject_cast<QLineEdit*>(fw) || qobject_cast<QTextEdit*>(fw) || qobject_cast<QSpinBox*>(fw))) {
+    auto isTextInput = [](QObject* obj) -> bool {
+        if (!obj) return false;
+        if (qobject_cast<QLineEdit*>(obj) ||
+            qobject_cast<QTextEdit*>(obj) ||
+            qobject_cast<QPlainTextEdit*>(obj) ||
+            qobject_cast<QAbstractSpinBox*>(obj)) {
+            return true;
+        }
+        if (auto cb = qobject_cast<QComboBox*>(obj)) {
+            if (cb->isEditable()) return true;
+        }
+        return false;
+    };
+
+    if (isTextInput(fw)) {
         QMainWindow::keyPressEvent(event);
         return;
     }

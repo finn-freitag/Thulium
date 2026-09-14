@@ -163,6 +163,8 @@ private:
     bool maybeSaveDocument(int index);
     void closeDocumentWithoutPrompt(int index);
     QString generateUntitledTitle();
+    bool isComponentOfMainWindow(QObject* obj) const;
+    bool isMainWindowActive() const;
 
     QList<std::shared_ptr<Document>> m_documents;
     int m_activeDocIndex = -1;

@@ -5,6 +5,7 @@
 #include <QKeyEvent>
 #include <QWheelEvent>
 #include <QClipboard>
+#include <QDialog>
 #include "../src/core/Document.h"
 #include "../src/tools/ToolManager.h"
 #include "../src/tools/SelectionTools.h"
@@ -574,7 +575,40 @@ int main(int argc, char* argv[]) {
         // Tool remains LassoSelect because typing in line edit takes priority
         assert(win.toolManager()->activeToolType() == pdn::ToolType::LassoSelect);
 
-        std::cout << "  Passed: eventFilter dispatches keybindings window-wide across all docks and child widgets!" << std::endl;
+        // 4. Verify that another window (e.g. QDialog simulating QFileDialog or EffectDialog) does NOT trigger MainWindow shortcuts
+        QDialog otherDialog(&win);
+        otherDialog.show();
+        otherDialog.activateWindow();
+        QLineEdit dialogEdit(&otherDialog);
+        dialogEdit.show();
+        dialogEdit.setFocus();
+
+        // Send key 'B' to the external dialog line edit
+        QApplication::sendEvent(&dialogEdit, &keyB);
+        assert(win.toolManager()->activeToolType() == pdn::ToolType::LassoSelect);
+
+        // Send key 'B' to the external dialog itself
+        QApplication::sendEvent(&otherDialog, &keyB);
+        assert(win.toolManager()->activeToolType() == pdn::ToolType::LassoSelect);
+
+        // Send key 'S' to the external dialog
+        QApplication::sendEvent(&otherDialog, &keyS);
+        assert(win.toolManager()->activeToolType() == pdn::ToolType::LassoSelect);
+
+        // Send Backspace to dialogEdit: should not trigger Fill Selection or change tools
+        QKeyEvent keyBack(QEvent::KeyPress, Qt::Key_Backspace, Qt::NoModifier);
+        QApplication::sendEvent(&dialogEdit, &keyBack);
+        assert(win.toolManager()->activeToolType() == pdn::ToolType::LassoSelect);
+
+        otherDialog.close();
+
+        // 5. Verify that keybinds still work when MainWindow or a dock component is focused
+        win.activateWindow();
+        testBtn->setFocus();
+        QApplication::sendEvent(testBtn, &keyB);
+        assert(win.toolManager()->activeToolType() == pdn::ToolType::Paintbrush);
+
+        std::cout << "  Passed: eventFilter dispatches keybindings window-wide across all docks and child widgets, and isolates other windows!" << std::endl;
     }
 
     // Test 13: Copy/Cut/Paste behavior, selection persistence & floating selection movement

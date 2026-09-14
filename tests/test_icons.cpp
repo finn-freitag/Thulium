@@ -42,7 +42,8 @@ int main(int argc, char* argv[]) {
         ":/icons/layer-merge-down.svg",
         ":/icons/layer-move-up.svg",
         ":/icons/layer-move-down.svg",
-        ":/icons/layer-properties.svg"
+        ":/icons/layer-properties.svg",
+        ":/icons/logo.png"
     };
 
     std::cout << "Test 1: Verifying all " << iconPaths.size() << " resource icons load and render..." << std::endl;
