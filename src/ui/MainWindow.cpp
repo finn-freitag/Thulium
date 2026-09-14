@@ -31,6 +31,7 @@
 #include <QVBoxLayout>
 #include <QFileInfo>
 #include <QUrl>
+#include <QLabel>
 #include <algorithm>
 
 static void initResources() {
@@ -1231,25 +1232,39 @@ void MainWindow::onResetWindowLocations() {
 }
 
 void MainWindow::onAbout() {
-    QMessageBox::about(this, "About Thulium",
+    QMessageBox box(this);
+    box.setWindowTitle("About Thulium");
+    box.setTextFormat(Qt::RichText);
+    box.setTextInteractionFlags(Qt::TextBrowserInteraction);
+    box.setText(
         "<h3>Thulium</h3>"
-        "<p>Cross-platform image editor written in C++ with Qt 6 and native Vulkan GPU rendering.</p>"
-        "<p>Features:"
+        "<p>A fast, lightweight, and cross-platform raster image editor.</p>"
+        "<p><b>Architecture & Technology:</b></p>"
         "<ul>"
-        "<li>Multiple images / documents in one window with thumbnail strip</li>"
-        "<li>PDN3 format reader/writer (Paint.NET compatible)</li>"
-        "<li>PNG, JPG, BMP, GIF, WebP support</li>"
-        "<li>19 raster editing tools with options toolbar</li>"
-        "<li>Color Picker with HSV Wheel & Swatches</li>"
-        "<li>Multi-layer editing with all 14 blend modes</li>"
-        "<li>Undo / Redo History stack</li>"
-        "<li>Adjustments: Auto-Level, Black & White, Brightness/Contrast, Hue/Saturation, Invert Colors, Invert Alpha, Posterize, Sepia, Temperature/Tint</li>"
-        "<li>Effects: Oil Painting, Gaussian/Motion/Radial Blur, Pixelate, Twist, Add Noise, Median, Glow, Sharpen, Vignette, Edge Detect, Emboss</li>"
-        "<li>Repeat Last Effect (Ctrl+F)</li>"
-        "<li>Vulkan GPU hardware rendering</li>"
-        "<li>Plugin-ready extensible architecture</li>"
+        "<li><b>Modern C++17 Core:</b> Native performance and compact memory footprint without managed runtime overhead.</li>"
+        "<li><b>Qt 6 UI:</b> Responsive, modular interface with dockable palettes and multi-document workflows.</li>"
+        "<li><b>Dual Rendering Pipeline:</b> Hardware-accelerated Vulkan GPU backend alongside an optimized CPU fallback.</li>"
+        "<li><b>Clean-Room Compatibility:</b> Direct read/write support for Paint.NET (<code>.pdn</code>) documents, plus PNG, JPEG, WebP, BMP, and GIF.</li>"
         "</ul>"
-        "</p>");
+        "<p>"
+        "Project: <a href=\"https://github.com/finn-freitag/Thulium\">https://github.com/finn-freitag/Thulium</a><br>"
+        "Author: <a href=\"https://finnfreitag.com?ref=thulium\">finnfreitag.com</a>"
+        "</p>"
+        "<hr>"
+        "<p><small>"
+        "Copyright &copy; 2026 Finn Freitag. Released under the MIT License.<br><br>"
+        "<b>Trademarks & Acknowledgments:</b><br>"
+        "Paint.NET is a registered trademark of Rick Brewster and dotPDN LLC. Thulium is an independent, clean-room project and is not affiliated with, endorsed by, or sponsored by dotPDN LLC.<br>"
+        "Qt is a registered trademark of The Qt Company Ltd. and its subsidiaries.<br>"
+        "Vulkan and the Vulkan logo are registered trademarks of the Khronos Group Inc."
+        "</small></p>"
+    );
+
+    for (QLabel* label : box.findChildren<QLabel*>()) {
+        label->setOpenExternalLinks(true);
+    }
+
+    box.exec();
 }
 
 void MainWindow::closeEvent(QCloseEvent* event) {
