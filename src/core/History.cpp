@@ -223,4 +223,24 @@ void MetadataUndoCommand::redo() {
     m_doc->setMetadataInternal(m_newMeta);
 }
 
+SelectionUndoCommand::SelectionUndoCommand(Document* doc, const QRegion& oldRegion, const QRegion& newRegion, const QString& text)
+    : QUndoCommand(text), m_doc(doc), m_oldRegion(oldRegion), m_newRegion(newRegion), m_firstRedo(true) {
+}
+
+void SelectionUndoCommand::undo() {
+    m_doc->selection().setRegion(m_oldRegion);
+    emit m_doc->selectionChanged();
+    emit m_doc->documentChanged();
+}
+
+void SelectionUndoCommand::redo() {
+    if (m_firstRedo) {
+        m_firstRedo = false;
+        return;
+    }
+    m_doc->selection().setRegion(m_newRegion);
+    emit m_doc->selectionChanged();
+    emit m_doc->documentChanged();
+}
+
 } // namespace pdn

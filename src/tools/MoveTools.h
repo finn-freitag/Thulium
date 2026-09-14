@@ -107,7 +107,11 @@ public:
 protected:
     void onSessionStarted(Document* doc) override;
     void onTransformUpdated(Document* doc) override;
+    void onSessionEnded(Document* doc) override;
     bool isPixelTool() const override { return false; }
+
+private:
+    QRegion m_startRegion;
 };
 
 class MoveSelectedPixelsTool : public MoveToolBase {

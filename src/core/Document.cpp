@@ -367,9 +367,19 @@ void Document::clearSelection() {
     emit documentChanged();
 }
 
+void Document::selectAll() {
+    if (m_hasFloatingSelection) {
+        bakeFloatingSelection();
+    }
+    m_selection.selectAll(m_width, m_height);
+    emit selectionChanged();
+    emit documentChanged();
+}
+
 void Document::setDocumentDimensions(int width, int height) {
     m_width = width;
     m_height = height;
+    m_selection.setDimensions(width, height);
 }
 
 void Document::setLayers(const QList<std::shared_ptr<Layer>>& layers, int activeIndex) {
@@ -425,6 +435,7 @@ void Document::resizeCanvas(int newWidth, int newHeight, Qt::Alignment anchor, b
 
     m_width = newWidth;
     m_height = newHeight;
+    m_selection.setDimensions(m_width, m_height);
     m_selection.clear();
     emit selectionChanged();
     emit documentChanged();
@@ -461,6 +472,7 @@ void Document::resizeImage(int newWidth, int newHeight, ResampleAlgorithm algo, 
     }
     m_width = newWidth;
     m_height = newHeight;
+    m_selection.setDimensions(m_width, m_height);
     m_selection.clear();
     emit selectionChanged();
     emit documentChanged();
@@ -504,6 +516,7 @@ void Document::crop(const QRect& rect, bool recordUndo) {
     }
     m_width = validRect.width();
     m_height = validRect.height();
+    m_selection.setDimensions(m_width, m_height);
     m_selection.clear();
     emit selectionChanged();
     emit documentChanged();

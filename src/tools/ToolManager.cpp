@@ -7,6 +7,7 @@
 #include "TextTool.h"
 #include "ViewTools.h"
 #include "../core/Document.h"
+#include "../core/History.h"
 #include <QKeyEvent>
 
 namespace pdn {
@@ -210,7 +211,12 @@ bool ToolManager::handleKeyPress(QKeyEvent* event) {
                     return true;
                 }
             }
+            QRegion oldRegion = m_document->selection().region();
             m_document->selection().translate(dx, dy);
+            QRegion newRegion = m_document->selection().region();
+            if (oldRegion != newRegion) {
+                m_document->undoStack()->push(new SelectionUndoCommand(m_document, oldRegion, newRegion, "Move Selection"));
+            }
             emit m_document->selectionChanged();
             emit m_document->documentChanged();
             return true;
@@ -220,7 +226,9 @@ bool ToolManager::handleKeyPress(QKeyEvent* event) {
     // Escape to deselect if selection is active
     if (key == Qt::Key_Escape) {
         if (m_document && !m_document->selection().isEmpty()) {
+            QRegion oldRegion = m_document->selection().region();
             m_document->clearSelection();
+            m_document->undoStack()->push(new SelectionUndoCommand(m_document, oldRegion, QRegion(), "Deselect"));
             return true;
         }
     }

@@ -73,7 +73,6 @@ public slots:
     void nextDocument();
     void previousDocument();
 
-private slots:
     // File
     void onNew();
     void onOpen();
@@ -160,6 +159,7 @@ private:
     void setupStatusBar();
     void updateTitle();
     void updateWindowMenu();
+    void updateSelectionStatus();
     bool maybeSaveDocument(int index);
     void closeDocumentWithoutPrompt(int index);
     QString generateUntitledTitle();

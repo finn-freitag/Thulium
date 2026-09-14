@@ -15,6 +15,7 @@ void ToolOptionsBar::setupWidgets() {
     // 1. Brush Width
     m_brushWidthLabel = new QLabel(" Width: ", this);
     m_brushWidthSpin = new QSpinBox(this);
+    m_brushWidthSpin->setFocusPolicy(Qt::NoFocus);
     m_brushWidthSpin->setRange(1, 500);
     m_brushWidthSpin->setValue(m_toolMgr->context().brushWidth);
     connect(m_brushWidthSpin, QOverload<int>::of(&QSpinBox::valueChanged), this, [this](int val) {
@@ -23,6 +24,7 @@ void ToolOptionsBar::setupWidgets() {
 
     // 2. Antialias
     m_antialiasBtn = new QToolButton(this);
+    m_antialiasBtn->setFocusPolicy(Qt::NoFocus);
     m_antialiasBtn->setText("Smooth");
     m_antialiasBtn->setCheckable(true);
     m_antialiasBtn->setChecked(m_toolMgr->context().antiAliasing);
@@ -34,6 +36,7 @@ void ToolOptionsBar::setupWidgets() {
     // 3. Selection mode
     m_selectionModeLabel = new QLabel(" Mode: ", this);
     m_selectionModeCombo = new QComboBox(this);
+    m_selectionModeCombo->setFocusPolicy(Qt::NoFocus);
     m_selectionModeCombo->addItem("Replace", static_cast<int>(SelectionCombineMode::Replace));
     m_selectionModeCombo->addItem("Add (Union)", static_cast<int>(SelectionCombineMode::Union));
     m_selectionModeCombo->addItem("Subtract", static_cast<int>(SelectionCombineMode::Exclude));
@@ -46,6 +49,7 @@ void ToolOptionsBar::setupWidgets() {
     // 4. Tolerance
     m_toleranceLabel = new QLabel(" Tolerance: ", this);
     m_toleranceSlider = new QSlider(Qt::Horizontal, this);
+    m_toleranceSlider->setFocusPolicy(Qt::NoFocus);
     m_toleranceSlider->setRange(0, 100);
     m_toleranceSlider->setValue(m_toolMgr->context().tolerance);
     m_toleranceSlider->setFixedWidth(100);
@@ -58,6 +62,7 @@ void ToolOptionsBar::setupWidgets() {
     // 5. Shapes & Fill Mode
     m_shapeTypeLabel = new QLabel(" Shape: ", this);
     m_shapeTypeCombo = new QComboBox(this);
+    m_shapeTypeCombo->setFocusPolicy(Qt::NoFocus);
     m_shapeTypeCombo->addItem("Rectangle", static_cast<int>(ShapeType::Rectangle));
     m_shapeTypeCombo->addItem("Rounded Rect", static_cast<int>(ShapeType::RoundedRectangle));
     m_shapeTypeCombo->addItem("Ellipse", static_cast<int>(ShapeType::Ellipse));
@@ -70,6 +75,7 @@ void ToolOptionsBar::setupWidgets() {
 
     m_fillModeLabel = new QLabel(" Style: ", this);
     m_fillModeCombo = new QComboBox(this);
+    m_fillModeCombo->setFocusPolicy(Qt::NoFocus);
     m_fillModeCombo->addItem("Outline", static_cast<int>(FillMode::OutlineOnly));
     m_fillModeCombo->addItem("Fill", static_cast<int>(FillMode::FillOnly));
     m_fillModeCombo->addItem("Outline & Fill", static_cast<int>(FillMode::OutlineAndFill));
@@ -80,6 +86,7 @@ void ToolOptionsBar::setupWidgets() {
     // 6. Gradient mode
     m_gradientModeLabel = new QLabel(" Gradient: ", this);
     m_gradientModeCombo = new QComboBox(this);
+    m_gradientModeCombo->setFocusPolicy(Qt::NoFocus);
     m_gradientModeCombo->addItem("Linear", static_cast<int>(GradientMode::Linear));
     m_gradientModeCombo->addItem("Radial", static_cast<int>(GradientMode::Radial));
     m_gradientModeCombo->addItem("Conical", static_cast<int>(GradientMode::Conical));
@@ -90,12 +97,14 @@ void ToolOptionsBar::setupWidgets() {
 
     // 7. Text Options
     m_fontCombo = new QFontComboBox(this);
+    m_fontCombo->setFocusPolicy(Qt::NoFocus);
     m_fontCombo->setCurrentFont(m_toolMgr->context().font);
     connect(m_fontCombo, &QFontComboBox::currentFontChanged, this, [this](const QFont& f) {
         m_toolMgr->context().font = f;
     });
 
     m_fontSizeCombo = new QComboBox(this);
+    m_fontSizeCombo->setFocusPolicy(Qt::NoFocus);
     const int sizes[] = {8, 9, 10, 11, 12, 14, 16, 18, 20, 24, 28, 32, 36, 48, 72};
     for (int s : sizes) m_fontSizeCombo->addItem(QString::number(s), s);
     m_fontSizeCombo->setCurrentText("12");
@@ -106,6 +115,7 @@ void ToolOptionsBar::setupWidgets() {
     });
 
     m_boldBtn = new QToolButton(this);
+    m_boldBtn->setFocusPolicy(Qt::NoFocus);
     m_boldBtn->setText("B");
     m_boldBtn->setCheckable(true);
     QFont bf = m_boldBtn->font();
@@ -116,6 +126,7 @@ void ToolOptionsBar::setupWidgets() {
     });
 
     m_italicBtn = new QToolButton(this);
+    m_italicBtn->setFocusPolicy(Qt::NoFocus);
     m_italicBtn->setText("I");
     m_italicBtn->setCheckable(true);
     QFont ift = m_italicBtn->font();
@@ -126,6 +137,7 @@ void ToolOptionsBar::setupWidgets() {
     });
 
     m_underlineBtn = new QToolButton(this);
+    m_underlineBtn->setFocusPolicy(Qt::NoFocus);
     m_underlineBtn->setText("U");
     m_underlineBtn->setCheckable(true);
     QFont uf = m_underlineBtn->font();

@@ -11,6 +11,9 @@ StatusWidget::StatusWidget(QWidget* parent) : QWidget(parent) {
     m_cursorLabel = new QLabel("X: --, Y: --", this);
     m_cursorLabel->setMinimumWidth(90);
 
+    m_selectionLabel = new QLabel("", this);
+    m_selectionLabel->setMinimumWidth(160);
+
     m_sizeLabel = new QLabel("Size: -- x --", this);
     m_sizeLabel->setMinimumWidth(110);
 
@@ -20,6 +23,7 @@ StatusWidget::StatusWidget(QWidget* parent) : QWidget(parent) {
     m_rendererLabel = new QLabel("Renderer: --", this);
 
     layout->addWidget(m_cursorLabel);
+    layout->addWidget(m_selectionLabel);
     layout->addWidget(m_sizeLabel);
     layout->addWidget(m_zoomLabel);
     layout->addStretch();
@@ -28,6 +32,14 @@ StatusWidget::StatusWidget(QWidget* parent) : QWidget(parent) {
 
 void StatusWidget::setCursorPos(int x, int y) {
     m_cursorLabel->setText(QString("X: %1, Y: %2").arg(x).arg(y));
+}
+
+void StatusWidget::setSelectionBounds(bool hasSelection, int x, int y, int w, int h) {
+    if (!hasSelection) {
+        m_selectionLabel->clear();
+    } else {
+        m_selectionLabel->setText(QString("Selection: X: %1, Y: %2 | %3 x %4 px").arg(x).arg(y).arg(w).arg(h));
+    }
 }
 
 void StatusWidget::setDocumentSize(int w, int h) {

@@ -616,6 +616,8 @@ void MoveToolBase::applyResize(const QPointF& docPos, bool shiftHeld) {
 void MoveSelectionTool::onSessionStarted(Document* doc) {
     if (!doc || doc->selection().isEmpty()) return;
 
+    m_startRegion = doc->selection().region();
+
     QRectF bounds = doc->selection().boundingRect();
     if (bounds.isEmpty() || bounds.width() <= 0 || bounds.height() <= 0) return;
 
@@ -633,6 +635,15 @@ void MoveSelectionTool::onTransformUpdated(Document* doc) {
     doc->selection().setPath(m_transform.map(m_localPath));
     emit doc->selectionChanged();
     emit doc->documentChanged();
+}
+
+void MoveSelectionTool::onSessionEnded(Document* doc) {
+    if (!doc) return;
+    QRegion newRegion = doc->selection().region();
+    if (newRegion != m_startRegion) {
+        doc->undoStack()->push(new SelectionUndoCommand(doc, m_startRegion, newRegion, "Move Selection"));
+    }
+    m_hasSession = false;
 }
 
 // --- MoveSelectedPixelsTool ---

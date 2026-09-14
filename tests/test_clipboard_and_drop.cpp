@@ -128,10 +128,10 @@ int main(int argc, char* argv[]) {
         assert(doc->width() == 800 && doc->height() == 600);
         // No new visible layer created
         assert(doc->layerCount() == initialLayers);
-        // Floating selection holds the full 1200x900 image and bounds
+        // Floating selection holds the full 1200x900 image, but selection is clipped to canvas (800x600)
         assert(doc->hasFloatingSelection());
         assert(doc->floatingImage().size() == QSize(1200, 900));
-        assert(doc->selection().boundingRect() == QRectF(0, 0, 1200, 900));
+        assert(doc->selection().boundingRect() == QRectF(0, 0, 800, 600));
 
         std::cout << "  Passed: KeepCanvasSize preserves canvas dimensions and creates floating selection exceeding bounds." << std::endl;
     }
@@ -257,7 +257,7 @@ int main(int argc, char* argv[]) {
         assert(doc->activeLayer()->name() == "Dropped Photo");
         assert(doc->hasFloatingSelection());
         assert(doc->floatingImage().size() == QSize(1500, 1000));
-        assert(doc->selection().boundingRect() == QRectF(0, 0, 1500, 1000));
+        assert(doc->selection().boundingRect() == QRectF(0, 0, 800, 600));
 
         std::cout << "  Passed: addImageAsLayer with KeepCanvasSize created new layer and floating selection exceeding bounds." << std::endl;
     }

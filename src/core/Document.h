@@ -57,6 +57,7 @@ public:
     Selection& selection() { return m_selection; }
     const Selection& selection() const { return m_selection; }
     void clearSelection();
+    void selectAll();
 
     // Floating selection (hidden temporary layer for paste & moving selected pixels)
     bool hasFloatingSelection() const { return m_hasFloatingSelection; }

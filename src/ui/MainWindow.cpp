@@ -169,8 +169,16 @@ void MainWindow::setActiveDocumentIndex(int index) {
     if (index < 0 || index >= m_documents.size()) return;
     if (index == m_activeDocIndex && m_doc == m_documents[index]) return;
 
+    if (m_doc) {
+        disconnect(m_doc.get(), &Document::selectionChanged, this, &MainWindow::updateSelectionStatus);
+    }
+
     m_activeDocIndex = index;
     m_doc = m_documents[m_activeDocIndex];
+
+    if (m_doc) {
+        connect(m_doc.get(), &Document::selectionChanged, this, &MainWindow::updateSelectionStatus);
+    }
 
     m_toolMgr->setDocument(m_doc.get());
     m_canvasView->setDocument(m_doc);
@@ -180,6 +188,7 @@ void MainWindow::setActiveDocumentIndex(int index) {
     m_documentStrip->setCurrentIndex(m_activeDocIndex);
     updateTitle();
     updateWindowMenu();
+    updateSelectionStatus();
 }
 
 std::shared_ptr<Document> MainWindow::activeDocument() const {
@@ -216,6 +225,7 @@ void MainWindow::closeDocumentWithoutPrompt(int index) {
     if (m_documents.isEmpty()) {
         m_activeDocIndex = -1;
         m_doc = nullptr;
+        updateSelectionStatus();
     } else {
         int newIdx = m_activeDocIndex;
         if (newIdx == index) {
@@ -599,6 +609,17 @@ void MainWindow::setupStatusBar() {
     if (m_canvasView->renderer()) {
         m_statusWidget->setRendererInfo(m_canvasView->renderer()->rendererName());
     }
+    updateSelectionStatus();
+}
+
+void MainWindow::updateSelectionStatus() {
+    if (!m_statusWidget) return;
+    if (m_doc && !m_doc->selection().isEmpty()) {
+        QRect bounds = m_doc->selection().region().boundingRect();
+        m_statusWidget->setSelectionBounds(true, bounds.x(), bounds.y(), bounds.width(), bounds.height());
+    } else {
+        m_statusWidget->setSelectionBounds(false, 0, 0, 0, 0);
+    }
 }
 
 // --- Slot Implementations ---
@@ -705,14 +726,42 @@ void MainWindow::onCut() {
 
     if (m_doc->hasFloatingSelection()) {
         onCopy();
+        m_doc->undoStack()->beginMacro("Cut");
+        QRegion oldRegion = m_doc->selection().region();
         m_doc->discardFloatingSelection();
         m_doc->clearSelection();
+        if (!oldRegion.isEmpty()) {
+            m_doc->undoStack()->push(new SelectionUndoCommand(m_doc.get(), oldRegion, QRegion(), "Deselect"));
+        }
+        m_doc->undoStack()->endMacro();
         return;
     }
 
     onCopy();
-    onEraseSelection();
+    m_doc->undoStack()->beginMacro("Cut");
+    auto layer = m_doc->activeLayer();
+    if (layer) {
+        QImage oldImg = layer->image().copy();
+        QPainter p(&layer->image());
+        p.setCompositionMode(QPainter::CompositionMode_Clear);
+        if (!m_doc->selection().isEmpty()) {
+            p.fillPath(m_doc->selection().path(), Qt::transparent);
+        } else {
+            layer->clear();
+        }
+        p.end();
+
+        m_doc->undoStack()->push(new LayerBitmapUndoCommand(m_doc.get(), m_doc->activeLayerIndex(), oldImg, "Cut"));
+    }
+
+    QRegion oldRegion = m_doc->selection().region();
     m_doc->clearSelection();
+    if (!oldRegion.isEmpty()) {
+        m_doc->undoStack()->push(new SelectionUndoCommand(m_doc.get(), oldRegion, QRegion(), "Deselect"));
+    }
+    m_doc->undoStack()->endMacro();
+
+    emit m_doc->documentChanged();
 }
 
 void MainWindow::onCopy() {
@@ -1092,21 +1141,37 @@ void MainWindow::onFillSelection() {
 
 void MainWindow::onInvertSelection() {
     if (m_doc) {
+        QRegion oldRegion = m_doc->selection().region();
         m_doc->selection().invert(m_doc->width(), m_doc->height());
+        QRegion newRegion = m_doc->selection().region();
+        if (oldRegion != newRegion) {
+            m_doc->undoStack()->push(new SelectionUndoCommand(m_doc.get(), oldRegion, newRegion, "Invert Selection"));
+        }
         emit m_doc->selectionChanged();
     }
 }
 
 void MainWindow::onSelectAll() {
     if (m_doc) {
+        if (m_doc->hasFloatingSelection()) {
+            m_doc->bakeFloatingSelection();
+        }
+        QRegion oldRegion = m_doc->selection().region();
         m_doc->selection().selectAll(m_doc->width(), m_doc->height());
+        QRegion newRegion = m_doc->selection().region();
+        if (oldRegion != newRegion) {
+            m_doc->undoStack()->push(new SelectionUndoCommand(m_doc.get(), oldRegion, newRegion, "Select All"));
+        }
         emit m_doc->selectionChanged();
+        emit m_doc->documentChanged();
     }
 }
 
 void MainWindow::onDeselect() {
-    if (m_doc) {
+    if (m_doc && !m_doc->selection().isEmpty()) {
+        QRegion oldRegion = m_doc->selection().region();
         m_doc->clearSelection();
+        m_doc->undoStack()->push(new SelectionUndoCommand(m_doc.get(), oldRegion, QRegion(), "Deselect"));
     }
 }
 

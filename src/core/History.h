@@ -166,4 +166,18 @@ private:
     bool m_firstRedo = true;
 };
 
+class SelectionUndoCommand : public QUndoCommand {
+public:
+    SelectionUndoCommand(Document* doc, const QRegion& oldRegion, const QRegion& newRegion, const QString& text = "Selection");
+
+    void undo() override;
+    void redo() override;
+
+private:
+    Document* m_doc;
+    QRegion m_oldRegion;
+    QRegion m_newRegion;
+    bool m_firstRedo = true;
+};
+
 } // namespace pdn

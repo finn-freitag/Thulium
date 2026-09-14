@@ -178,4 +178,8 @@ add_executable(test_icons tests/test_icons.cpp)
 target_link_libraries(test_icons PRIVATE pdn_core)
 add_test(NAME test_icons COMMAND test_icons)
 
+add_executable(test_selection_system tests/test_selection_system.cpp)
+target_link_libraries(test_selection_system PRIVATE pdn_core)
+add_test(NAME test_selection_system COMMAND test_selection_system)
+
 
