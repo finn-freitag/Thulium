@@ -1,6 +1,7 @@
 #include "MainWindow.h"
 #include "../io/ImageIO.h"
 #include "Dialogs.h"
+#include "PrintDialog.h"
 #include "../effects/BrightnessContrast.h"
 #include "../effects/GaussianBlur.h"
 #include "../effects/Adjustments.h"
@@ -413,6 +414,8 @@ void MainWindow::setupMenus() {
     fileMenu->addAction("Save &As...", this, &MainWindow::onSaveAs, QKeySequence::SaveAs);
     fileMenu->addAction("Save Al&l", this, &MainWindow::onSaveAll, QKeySequence("Ctrl+Alt+S"));
     fileMenu->addSeparator();
+    fileMenu->addAction(QIcon::fromTheme("document-print"), "&Print...", this, &MainWindow::onPrint, QKeySequence::Print);
+    fileMenu->addSeparator();
     fileMenu->addAction("&Close", this, &MainWindow::onClose, QKeySequence::Close);
     fileMenu->addAction("Close &All", this, &MainWindow::onCloseAll, QKeySequence("Ctrl+Shift+W"));
     fileMenu->addSeparator();
@@ -702,6 +705,12 @@ bool MainWindow::onSaveAs() {
 
 bool MainWindow::onSaveAll() {
     return saveAllDocuments();
+}
+
+void MainWindow::onPrint() {
+    if (!m_doc) return;
+    PrintDialog dlg(m_doc.get(), this);
+    dlg.exec();
 }
 
 void MainWindow::onClose() {

@@ -79,6 +79,7 @@ public slots:
     bool onSave();
     bool onSaveAs();
     bool onSaveAll();
+    void onPrint();
     void onClose();
     void onCloseAll();
     void onMetadata();

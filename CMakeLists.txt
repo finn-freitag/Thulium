@@ -8,7 +8,7 @@ set(CMAKE_AUTOMOC ON)
 set(CMAKE_AUTORCC ON)
 set(CMAKE_AUTOUIC ON)
 
-find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Svg)
+find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Svg PrintSupport)
 find_package(ZLIB REQUIRED)
 find_package(GIF REQUIRED)
 
@@ -107,6 +107,8 @@ set(PDN_SOURCES
     src/ui/ColorsDock.cpp
     src/ui/Dialogs.h
     src/ui/Dialogs.cpp
+    src/ui/PrintDialog.h
+    src/ui/PrintDialog.cpp
     src/ui/StatusWidget.h
     src/ui/StatusWidget.cpp
     src/ui/MainWindow.h
@@ -122,6 +124,7 @@ target_link_libraries(pdn_core PUBLIC
     Qt6::Gui
     Qt6::Widgets
     Qt6::Svg
+    Qt6::PrintSupport
     ZLIB::ZLIB
     GIF::GIF
     ${VULKAN_LIB}
@@ -181,5 +184,9 @@ add_test(NAME test_icons COMMAND test_icons)
 add_executable(test_selection_system tests/test_selection_system.cpp)
 target_link_libraries(test_selection_system PRIVATE pdn_core)
 add_test(NAME test_selection_system COMMAND test_selection_system)
+
+add_executable(test_print tests/test_print.cpp)
+target_link_libraries(test_print PRIVATE pdn_core)
+add_test(NAME test_print COMMAND test_print)
 
 
