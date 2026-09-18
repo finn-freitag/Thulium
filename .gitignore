@@ -50,5 +50,12 @@ Desktop.ini
 *.tmp
 *.bak
 
+# Flatpak artifacts
+.flatpak-builder/
+build-flatpak/
+repo/
+*.flatpak
+
 *.pdn
 Card.png
+

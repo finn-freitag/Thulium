@@ -138,55 +138,78 @@ target_include_directories(pdn_core PUBLIC
 add_executable(thulium src/main.cpp)
 target_link_libraries(thulium PRIVATE pdn_core)
 
+# Installation
+include(GNUInstallDirs)
+
+install(TARGETS thulium
+    RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+)
+
+install(FILES resources/com.finnfreitag.thulium.desktop
+    DESTINATION ${CMAKE_INSTALL_DATADIR}/applications
+)
+
+install(FILES resources/com.finnfreitag.thulium.metainfo.xml
+    DESTINATION ${CMAKE_INSTALL_DATADIR}/metainfo
+)
+
+foreach(SIZE 48 64 128 256 512)
+    install(FILES resources/icons/hicolor/${SIZE}x${SIZE}/apps/com.finnfreitag.thulium.png
+        DESTINATION ${CMAKE_INSTALL_DATADIR}/icons/hicolor/${SIZE}x${SIZE}/apps
+    )
+endforeach()
+
 # Tests
-enable_testing()
+include(CTest)
+if(BUILD_TESTING)
+    add_executable(test_pdn tests/test_pdn.cpp)
+    target_link_libraries(test_pdn PRIVATE pdn_core)
+    add_test(NAME test_pdn COMMAND test_pdn "${CMAKE_CURRENT_SOURCE_DIR}/Card.pdn")
 
-add_executable(test_pdn tests/test_pdn.cpp)
-target_link_libraries(test_pdn PRIVATE pdn_core)
-add_test(NAME test_pdn COMMAND test_pdn "${CMAKE_CURRENT_SOURCE_DIR}/Card.pdn")
+    add_executable(test_blend tests/test_blend.cpp)
+    target_link_libraries(test_blend PRIVATE pdn_core)
+    add_test(NAME test_blend COMMAND test_blend)
 
-add_executable(test_blend tests/test_blend.cpp)
-target_link_libraries(test_blend PRIVATE pdn_core)
-add_test(NAME test_blend COMMAND test_blend)
+    add_executable(test_effects tests/test_effects.cpp)
+    target_link_libraries(test_effects PRIVATE pdn_core)
+    add_test(NAME test_effects COMMAND test_effects)
 
-add_executable(test_effects tests/test_effects.cpp)
-target_link_libraries(test_effects PRIVATE pdn_core)
-add_test(NAME test_effects COMMAND test_effects)
+    add_executable(test_formats tests/test_formats.cpp)
+    target_link_libraries(test_formats PRIVATE pdn_core)
+    add_test(NAME test_formats COMMAND test_formats)
 
-add_executable(test_formats tests/test_formats.cpp)
-target_link_libraries(test_formats PRIVATE pdn_core)
-add_test(NAME test_formats COMMAND test_formats)
+    add_executable(test_fixes tests/test_fixes.cpp)
+    target_link_libraries(test_fixes PRIVATE pdn_core)
+    add_test(NAME test_fixes COMMAND test_fixes)
 
-add_executable(test_fixes tests/test_fixes.cpp)
-target_link_libraries(test_fixes PRIVATE pdn_core)
-add_test(NAME test_fixes COMMAND test_fixes)
+    add_executable(test_image_operations tests/test_image_operations.cpp)
+    target_link_libraries(test_image_operations PRIVATE pdn_core)
+    add_test(NAME test_image_operations COMMAND test_image_operations)
 
-add_executable(test_image_operations tests/test_image_operations.cpp)
-target_link_libraries(test_image_operations PRIVATE pdn_core)
-add_test(NAME test_image_operations COMMAND test_image_operations)
+    add_executable(test_multi_document tests/test_multi_document.cpp)
+    target_link_libraries(test_multi_document PRIVATE pdn_core)
+    add_test(NAME test_multi_document COMMAND test_multi_document)
 
-add_executable(test_multi_document tests/test_multi_document.cpp)
-target_link_libraries(test_multi_document PRIVATE pdn_core)
-add_test(NAME test_multi_document COMMAND test_multi_document)
+    add_executable(test_metadata tests/test_metadata.cpp)
+    target_link_libraries(test_metadata PRIVATE pdn_core)
+    add_test(NAME test_metadata COMMAND test_metadata "${CMAKE_CURRENT_SOURCE_DIR}/Card.pdn")
 
-add_executable(test_metadata tests/test_metadata.cpp)
-target_link_libraries(test_metadata PRIVATE pdn_core)
-add_test(NAME test_metadata COMMAND test_metadata "${CMAKE_CURRENT_SOURCE_DIR}/Card.pdn")
+    add_executable(test_clipboard_and_drop tests/test_clipboard_and_drop.cpp)
+    target_link_libraries(test_clipboard_and_drop PRIVATE pdn_core)
+    add_test(NAME test_clipboard_and_drop COMMAND test_clipboard_and_drop "${CMAKE_CURRENT_SOURCE_DIR}")
 
-add_executable(test_clipboard_and_drop tests/test_clipboard_and_drop.cpp)
-target_link_libraries(test_clipboard_and_drop PRIVATE pdn_core)
-add_test(NAME test_clipboard_and_drop COMMAND test_clipboard_and_drop "${CMAKE_CURRENT_SOURCE_DIR}")
+    add_executable(test_icons tests/test_icons.cpp)
+    target_link_libraries(test_icons PRIVATE pdn_core)
+    add_test(NAME test_icons COMMAND test_icons)
 
-add_executable(test_icons tests/test_icons.cpp)
-target_link_libraries(test_icons PRIVATE pdn_core)
-add_test(NAME test_icons COMMAND test_icons)
+    add_executable(test_selection_system tests/test_selection_system.cpp)
+    target_link_libraries(test_selection_system PRIVATE pdn_core)
+    add_test(NAME test_selection_system COMMAND test_selection_system)
 
-add_executable(test_selection_system tests/test_selection_system.cpp)
-target_link_libraries(test_selection_system PRIVATE pdn_core)
-add_test(NAME test_selection_system COMMAND test_selection_system)
+    add_executable(test_print tests/test_print.cpp)
+    target_link_libraries(test_print PRIVATE pdn_core)
+    add_test(NAME test_print COMMAND test_print)
+endif()
 
-add_executable(test_print tests/test_print.cpp)
-target_link_libraries(test_print PRIVATE pdn_core)
-add_test(NAME test_print COMMAND test_print)
 
 

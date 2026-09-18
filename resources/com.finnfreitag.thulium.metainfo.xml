@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>com.finnfreitag.thulium</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>MIT</project_license>
+  <name>Thulium</name>
+  <summary>Fast, lightweight, and cross-platform raster image editor</summary>
+  <description>
+    <p>
+      Thulium is a fast, lightweight, and cross-platform raster image editor written in native C++17 with Qt 6 and a hardware-accelerated Vulkan rendering pipeline.
+    </p>
+    <p>
+      Key features include:
+    </p>
+    <ul>
+      <li>Native reader and writer for the Paint.NET (.pdn / PDN3) document format alongside standard formats (PNG, JPEG, WebP, BMP, GIF).</li>
+      <li>Hardware-accelerated Vulkan backend for real-time viewport transformations, pan, zoom, and blitting with optimized CPU fallback.</li>
+      <li>Non-destructive multi-layer composition with opacity controls and blend modes.</li>
+      <li>Comprehensive toolset: Brush, Pencil, Eraser, Fill Bucket, Shapes, Text, Color Picker, and Selection tools.</li>
+      <li>Built-in adjustments and effects: Brightness/Contrast, Gaussian Blur, Hue/Saturation, Invert, and more.</li>
+      <li>Full undo/redo history stack and multi-document tabbed workspace.</li>
+    </ul>
+  </description>
+  <launchable type="desktop-id">com.finnfreitag.thulium.desktop</launchable>
+  <url type="homepage">https://github.com/finn-freitag/Thulium</url>
+  <provides>
+    <mediatype>image/png</mediatype>
+    <mediatype>image/jpeg</mediatype>
+    <mediatype>image/gif</mediatype>
+    <mediatype>image/bmp</mediatype>
+    <mediatype>image/webp</mediatype>
+    <mediatype>image/x-paintnet</mediatype>
+  </provides>
+  <developer id="com.finnfreitag">
+    <name>Finn Freitag</name>
+  </developer>
+  <content_rating type="oars-1.1" />
+  <releases>
+    <release version="0.1.0" date="2026-09-18" />
+  </releases>
+</component>

@@ -9,6 +9,7 @@ int main(int argc, char* argv[]) {
     app.setApplicationName("Thulium");
     app.setOrganizationName("Thulium");
     app.setApplicationVersion("1.0.0");
+    app.setDesktopFileName("com.finnfreitag.thulium");
     app.setWindowIcon(QIcon(":/icons/logo.png"));
 
     pdn::MainWindow window;
