@@ -31,6 +31,12 @@
     <mediatype>image/webp</mediatype>
     <mediatype>image/x-paintnet</mediatype>
   </provides>
+  <screenshots>
+    <screenshot type="default">
+      <caption>The Thulium main workspace and editing canvas</caption>
+      <image>https://github.com/finn-freitag/Thulium/blob/master/screenshots/1.png?raw=true</image>
+    </screenshot>
+  </screenshots>
   <developer id="com.finnfreitag">
     <name>Finn Freitag</name>
   </developer>
