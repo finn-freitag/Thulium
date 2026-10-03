@@ -55,6 +55,22 @@ cmake --build build -j$(nproc)
 ctest --test-dir build --output-on-failure
 ```
 
+### Building & Installing with Nix
+
+```bash
+# Build Thulium
+nix build
+
+# Run directly without installing
+nix run
+
+# Install into your user profile
+nix profile install .
+
+# Enter an interactive development shell
+nix develop
+```
+
 ---
 
 ## License & Trademarks

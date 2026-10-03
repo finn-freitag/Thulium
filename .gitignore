@@ -4,6 +4,8 @@ bin/
 out/
 dist/
 cmake-build-*/
+result
+result-*
 
 # CMake generated files
 CMakeFiles/
