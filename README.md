@@ -76,7 +76,7 @@ nix develop
 ## License & Trademarks
 
 ### License
-Thulium is open-source software licensed under the **[MIT License](LICENSE)**.  
+Thulium is open-source software licensed under the **[MIT License](https://github.com/finn-freitag/Thulium/blob/master/LICENSE)**.  
 Copyright &copy; 2026 Finn Freitag.
 
 ### Trademarks & Disclaimers
