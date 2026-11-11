@@ -1,6 +1,7 @@
 #pragma once
 
 #include "ITool.h"
+#include "LayerEdit.h"
 #include <QPointF>
 #include <QImage>
 
@@ -17,11 +18,10 @@ public:
     void mousePress(QMouseEvent* event, Document* doc, const QPointF& docPos, ToolContext& ctx) override;
     void mouseMove(QMouseEvent* /*event*/, Document* /*doc*/, const QPointF& /*docPos*/, ToolContext& /*ctx*/) override {}
     void mouseRelease(QMouseEvent* /*event*/, Document* /*doc*/, const QPointF& /*docPos*/, ToolContext& /*ctx*/) override {}
-
-private:
-    void floodFill(Document* doc, int startX, int startY, const QColor& fillColor, int tolerance);
 };
 
+// Drag to draw a gradient from the primary to the secondary colour (right button: reversed).
+// The gradient is rendered live while dragging.
 class GradientTool : public ITool {
 public:
     ToolType type() const override { return ToolType::Gradient; }
@@ -30,18 +30,21 @@ public:
     QString shortcut() const override { return "G"; }
     QCursor cursor() const override { return Qt::CrossCursor; }
 
+    void deactivate(Document* doc, ToolContext& ctx) override;
     void mousePress(QMouseEvent* event, Document* doc, const QPointF& docPos, ToolContext& ctx) override;
     void mouseMove(QMouseEvent* event, Document* doc, const QPointF& docPos, ToolContext& ctx) override;
     void mouseRelease(QMouseEvent* event, Document* doc, const QPointF& docPos, ToolContext& ctx) override;
+    void keyPress(QKeyEvent* event, Document* doc, ToolContext& ctx) override;
     void drawOverlay(QPainter& painter, const RenderOptions& opts) override;
 
 private:
-    void applyGradient(Document* doc, const ToolContext& ctx);
+    void renderGradient(Document* doc, const ToolContext& ctx);
 
+    LayerEdit m_edit;
     QPointF m_startPos;
     QPointF m_endPos;
-    bool m_dragging = false;
-    QImage m_undoSnapshot;
+    QColor m_startColor;
+    QColor m_endColor;
 };
 
 } // namespace pdn

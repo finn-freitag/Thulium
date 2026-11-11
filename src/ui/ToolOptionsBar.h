@@ -7,6 +7,7 @@
 #include <QToolButton>
 #include <QFontComboBox>
 #include <QLabel>
+#include <QHash>
 #include "../tools/ToolManager.h"
 
 namespace pdn {
@@ -25,12 +26,22 @@ public slots:
 
 private:
     void setupWidgets();
+    void addOption(QWidget* widget);
+    void setOptionVisible(QWidget* widget, bool visible);
+
+    QHash<QWidget*, QAction*> m_optionActions;
 
     ToolManager* m_toolMgr;
 
     // Brush width
     QLabel* m_brushWidthLabel;
     QSpinBox* m_brushWidthSpin;
+
+    // Hardness and blend mode of painting tools
+    QLabel* m_hardnessLabel;
+    QSpinBox* m_hardnessSpin;
+    QLabel* m_blendModeLabel;
+    QComboBox* m_blendModeCombo;
 
     // Antialias
     QToolButton* m_antialiasBtn;
@@ -46,6 +57,7 @@ private:
     QLabel* m_toleranceLabel;
     QSlider* m_toleranceSlider;
     QLabel* m_toleranceValLabel;
+    QComboBox* m_floodModeCombo;
 
     // Fill mode & Shape type
     QLabel* m_shapeTypeLabel;

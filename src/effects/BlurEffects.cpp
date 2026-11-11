@@ -1,4 +1,5 @@
 #include "BlurEffects.h"
+#include "../core/Parallel.h"
 #include <cmath>
 #include <algorithm>
 #include <vector>
@@ -24,7 +25,8 @@ void MotionBlurEffect::process(QImage& image, const Selection& selection, int an
     double startT = centered ? (-distance / 2.0) : 0.0;
     double stepSize = static_cast<double>(distance) / numSteps;
 
-    for (int y = 0; y < h; ++y) {
+    image.detach(); // worker threads must not trigger a copy-on-write
+    parallelRows(h, [&](int y) {
         uint32_t* dstLine = reinterpret_cast<uint32_t*>(image.scanLine(y));
         for (int x = 0; x < w; ++x) {
             if (!selection.isEmpty() && !selection.containsPixel(x, y)) continue;
@@ -55,10 +57,11 @@ void MotionBlurEffect::process(QImage& image, const Selection& selection, int an
                 dstLine[x] = (avgA << 24) | (avgR << 16) | (avgG << 8) | avgB;
             }
         }
-    }
+    });
 }
 
 bool MotionBlurEffect::apply(QImage& image, const Selection& selection) {
+    if (applyRemembered(image, selection)) return true;
     process(image, selection, 0, 10, true);
     return true;
 }
@@ -66,7 +69,7 @@ bool MotionBlurEffect::apply(QImage& image, const Selection& selection) {
 bool MotionBlurEffect::showDialog(QWidget* parent, Document* doc) {
     if (!doc || !doc->activeLayer()) return false;
     MotionBlurDialog dlg(doc, parent);
-    return dlg.exec() == QDialog::Accepted;
+    return runDialog(dlg);
 }
 
 MotionBlurDialog::MotionBlurDialog(Document* doc, QWidget* parent)
@@ -81,6 +84,12 @@ MotionBlurDialog::MotionBlurDialog(Document* doc, QWidget* parent)
 
 void MotionBlurDialog::processPreview(QImage& image) {
     MotionBlurEffect::process(image, m_doc->selection(), m_angle, m_distance, m_centered);
+}
+
+EffectApplier MotionBlurDialog::applier() const {
+    return [p0 = m_angle, p1 = m_distance, p2 = m_centered](QImage& image, const Selection& selection) {
+        MotionBlurEffect::process(image, selection, p0, p1, p2);
+    };
 }
 
 // ==========================================
@@ -100,7 +109,8 @@ void RadialBlurEffect::process(QImage& image, const Selection& selection, int an
     double maxRad = (angle * M_PI / 180.0) * 0.15;
     const int numSamples = 11;
 
-    for (int y = 0; y < h; ++y) {
+    image.detach(); // worker threads must not trigger a copy-on-write
+    parallelRows(h, [&](int y) {
         uint32_t* dstLine = reinterpret_cast<uint32_t*>(image.scanLine(y));
         for (int x = 0; x < w; ++x) {
             if (!selection.isEmpty() && !selection.containsPixel(x, y)) continue;
@@ -137,10 +147,11 @@ void RadialBlurEffect::process(QImage& image, const Selection& selection, int an
             uint32_t avgB = sumB / numSamples;
             dstLine[x] = (avgA << 24) | (avgR << 16) | (avgG << 8) | avgB;
         }
-    }
+    });
 }
 
 bool RadialBlurEffect::apply(QImage& image, const Selection& selection) {
+    if (applyRemembered(image, selection)) return true;
     process(image, selection, 10);
     return true;
 }
@@ -148,7 +159,7 @@ bool RadialBlurEffect::apply(QImage& image, const Selection& selection) {
 bool RadialBlurEffect::showDialog(QWidget* parent, Document* doc) {
     if (!doc || !doc->activeLayer()) return false;
     RadialBlurDialog dlg(doc, parent);
-    return dlg.exec() == QDialog::Accepted;
+    return runDialog(dlg);
 }
 
 RadialBlurDialog::RadialBlurDialog(Document* doc, QWidget* parent)
@@ -225,6 +236,12 @@ void RadialBlurDialog::onReset() {
 
 void RadialBlurDialog::processPreview(QImage& image) {
     RadialBlurEffect::process(image, m_doc->selection(), m_angle, m_center);
+}
+
+EffectApplier RadialBlurDialog::applier() const {
+    return [p0 = m_angle, p1 = m_center](QImage& image, const Selection& selection) {
+        RadialBlurEffect::process(image, selection, p0, p1);
+    };
 }
 
 } // namespace pdn

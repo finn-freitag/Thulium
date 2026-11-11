@@ -6,8 +6,6 @@
 , qt6
 , zlib
 , giflib
-, vulkan-loader
-, vulkan-headers
 }:
 
 stdenv.mkDerivation {
@@ -33,11 +31,10 @@ stdenv.mkDerivation {
   buildInputs = [
     qt6.qtbase
     qt6.qtsvg
+    qt6.qtimageformats # WebP (and TIFF, ...) reading and writing
     qt6.qtwayland
     zlib
     giflib
-    vulkan-loader
-    vulkan-headers
   ];
 
   cmakeFlags = [

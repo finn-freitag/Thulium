@@ -3,10 +3,12 @@
 #include "ITool.h"
 #include <QPointF>
 #include <QString>
-#include <QImage>
+#include <QStringList>
 
 namespace pdn {
 
+// Click to place a caret, then type. Enter starts a new line; the text is committed to the
+// layer with Ctrl+Enter, by clicking elsewhere or by switching tools. Escape discards it.
 class TextTool : public ITool {
 public:
     ToolType type() const override { return ToolType::Text; }
@@ -30,11 +32,16 @@ public:
     void commit(Document* doc, const ToolContext& ctx);
 
 private:
+    // Draws the text block with its anchor at origin; scale converts document to painter units.
+    void renderText(QPainter& p, const QPointF& origin, qreal scale, const ToolContext& ctx, bool drawCaret) const;
+    QRectF textBounds(const ToolContext& ctx) const;
+    QStringList lines() const { return m_text.split('\n'); }
+    void cancel();
+
     QPointF m_textPos;
     QString m_text;
+    int m_caret = 0; // index into m_text
     bool m_active = false;
-    bool m_cursorVisible = true;
-    QImage m_undoSnapshot;
     ToolContext m_currentCtx;
 };
 

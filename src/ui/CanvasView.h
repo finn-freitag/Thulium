@@ -9,23 +9,27 @@
 #include "../tools/ToolManager.h"
 #include "../effects/ICanvasInteraction.h"
 
+class QScrollBar;
+
 namespace pdn {
 
 class CanvasView : public QWidget, public ICanvasInteractionBridge {
     Q_OBJECT
 public:
     explicit CanvasView(ToolManager* toolMgr, QWidget* parent = nullptr);
-    ~CanvasView() override = default;
+    ~CanvasView() override;
 
     void setDocument(std::shared_ptr<Document> doc);
     std::shared_ptr<Document> document() const { return m_doc; }
 
     double zoom() const { return m_renderOpts.zoom; }
+    // Zooms keeping centerDocPos fixed on screen; by default the centre of the viewport stays put.
     void setZoom(double z, const QPointF& centerDocPos = QPointF(-1, -1));
     void zoomIn();
     void zoomOut();
     void zoomActualSize();
     void zoomToWindow();
+    void zoomToRect(const QRectF& docRect);
 
     void setPanOffset(const QPointF& offset);
     QPointF panOffset() const { return m_renderOpts.panOffset; }
@@ -66,9 +70,25 @@ protected:
     void mouseReleaseEvent(QMouseEvent* event) override;
     void wheelEvent(QWheelEvent* event) override;
     void keyPressEvent(QKeyEvent* event) override;
+    void keyReleaseEvent(QKeyEvent* event) override;
+    void leaveEvent(QEvent* event) override;
 
 private:
+    int rulerOffset() const { return m_renderOpts.showRulers ? m_rulerWidth : 0; }
+    QSize viewportSize() const;
+    QPointF viewportCenterDocPos() const;
+    void applyView(double zoom, const QPointF& pan);
+    void onPixelsChanged(const QRect& docRect);
+    void onSelectionChanged();
+    void updateScrollBars();
+    void updateToolCursor();
+    void updateRulerMarkers();
     void drawRulers(QPainter& painter);
+    void drawBrushOutline(QPainter& painter);
+    QRect brushOutlineRect(const QPoint& widgetPos) const;
+    bool activeToolUsesBrushOutline() const;
+    void beginPan(const QPoint& pos);
+    void endPan();
 
     std::shared_ptr<Document> m_doc;
     ToolManager* m_toolMgr;
@@ -76,9 +96,16 @@ private:
     RenderOptions m_renderOpts;
     QMap<const Document*, RenderOptions> m_viewStates;
 
+    QScrollBar* m_hScroll = nullptr;
+    QScrollBar* m_vScroll = nullptr;
+    bool m_syncingScrollBars = false;
+
     QTimer m_marchingAntsTimer;
-    bool m_spacePanning = false;
+    bool m_fitPending = false; // zoomToWindow() was requested before the view had a size
+    bool m_panning = false;
+    bool m_spaceHeld = false;
     QPoint m_lastMousePos;
+    bool m_mouseInside = false;
     int m_rulerWidth = 18;
 
     ICanvasPointReceiver* m_pointReceiver = nullptr;

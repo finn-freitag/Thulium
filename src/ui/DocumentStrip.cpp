@@ -14,21 +14,23 @@ namespace pdn {
 
 // --- DocumentTabItem ---
 
+static constexpr int kMaxTitleWidth = 160; // longer titles are elided
+
 DocumentTabItem::DocumentTabItem(std::shared_ptr<Document> doc, QWidget* parent)
     : QWidget(parent), m_doc(doc) {
     setObjectName("DocumentTabItem");
     setFixedHeight(36);
-    setMinimumWidth(120);
-    setMaximumWidth(220);
-    setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Fixed);
+    setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
+    setAttribute(Qt::WA_StyledBackground, true); // plain QWidgets ignore stylesheet backgrounds otherwise
 
     setupUI();
 
     if (m_doc) {
-        connect(m_doc.get(), &Document::documentChanged, this, [this]() {
+        connect(m_doc.get(), &Document::documentChanged, this, &DocumentTabItem::updateTab);
+        connect(m_doc.get(), &Document::pixelsChanged, this, [this]() {
+            // Not restarted while pending, so the thumbnail keeps refreshing during a long stroke
             m_thumbDirty = true;
-            m_thumbTimer.start();
-            updateTab();
+            if (!m_thumbTimer.isActive()) m_thumbTimer.start();
         });
         if (m_doc->undoStack()) {
             connect(m_doc->undoStack(), &QUndoStack::cleanChanged, this, [this](bool) {
@@ -38,7 +40,7 @@ DocumentTabItem::DocumentTabItem(std::shared_ptr<Document> doc, QWidget* parent)
     }
 
     m_thumbTimer.setSingleShot(true);
-    m_thumbTimer.setInterval(150);
+    m_thumbTimer.setInterval(250);
     connect(&m_thumbTimer, &QTimer::timeout, this, &DocumentTabItem::generateThumbnail);
 
     generateThumbnail();
@@ -70,7 +72,6 @@ void DocumentTabItem::setupUI() {
 
     // Document title
     m_titleLabel = new QLabel(this);
-    m_titleLabel->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
 
     // Close button
     m_closeBtn = new QToolButton(this);
@@ -97,41 +98,27 @@ void DocumentTabItem::setActive(bool active) {
 }
 
 void DocumentTabItem::updateStyle() {
-    QString baseStyle =
+    // Colours come from the application palette so the tabs match light and dark themes alike.
+    const QString background = m_active ? "palette(base)" : (m_hovered ? "palette(midlight)" : "palette(window)");
+    setStyleSheet(QString(
         "#DocumentTabItem {"
-        "  border: 1px solid #c0c4c8;"
+        "  border: 1px solid palette(mid);"
         "  border-bottom: none;"
+        "  border-top: %1;"
         "  border-top-left-radius: 4px;"
-        "  border-top-right-radius: 4px;";
+        "  border-top-right-radius: 4px;"
+        "  background-color: %2;"
+        "}")
+        .arg(m_active ? "3px solid palette(highlight)" : "1px solid palette(mid)", background));
 
-    if (m_active) {
-        baseStyle +=
-            "  background-color: #ffffff;"
-            "  border-top: 3px solid #0078d7;"
-            "}";
-        m_titleLabel->setStyleSheet("color: #111111; font-weight: bold; font-size: 9pt;");
-    } else if (m_hovered) {
-        baseStyle +=
-            "  background-color: #e8ecf0;"
-            "  border-top: 1px solid #b0b4b8;"
-            "}";
-        m_titleLabel->setStyleSheet("color: #222222; font-weight: normal; font-size: 9pt;");
-    } else {
-        baseStyle +=
-            "  background-color: #dadfe4;"
-            "  border-top: 1px solid #c0c4c8;"
-            "}";
-        m_titleLabel->setStyleSheet("color: #444444; font-weight: normal; font-size: 9pt;");
-    }
+    m_titleLabel->setStyleSheet(QString("color: palette(window-text); font-weight: %1; font-size: 9pt;")
+                                    .arg(m_active ? "bold" : "normal"));
 
-    setStyleSheet(baseStyle);
-
-    // Close button style
     m_closeBtn->setStyleSheet(
         "QToolButton {"
         "  border: none;"
         "  background: transparent;"
-        "  color: #555555;"
+        "  color: palette(window-text);"
         "  font-size: 14px;"
         "  font-weight: bold;"
         "  border-radius: 9px;"
@@ -151,9 +138,9 @@ void DocumentTabItem::generateThumbnail() {
     QPixmap result = makeCheckerboard(thumbW, thumbH, 4);
     QPainter p(&result);
 
-    QImage comp = m_doc->composite();
-    if (!comp.isNull()) {
-        QImage scaled = comp.scaled(thumbW - 2, thumbH - 2, Qt::KeepAspectRatio, Qt::SmoothTransformation);
+    // Point-sampled preview: independent of the document's resolution
+    const QImage scaled = m_doc->thumbnail(QSize(thumbW - 2, thumbH - 2));
+    if (!scaled.isNull()) {
         int ox = (thumbW - scaled.width()) / 2;
         int oy = (thumbH - scaled.height()) / 2;
         p.drawImage(ox, oy, scaled);
@@ -176,9 +163,14 @@ void DocumentTabItem::updateTab() {
         name += "*";
     }
 
-    QFontMetrics fm(m_titleLabel->font());
-    QString elided = fm.elidedText(name, Qt::ElideRight, 120);
+    // Measure with the bold font so the title fits whether or not the tab is active
+    QFont measureFont = m_titleLabel->font();
+    measureFont.setBold(true);
+    const QFontMetrics fm(measureFont);
+    const QString elided = fm.elidedText(name, Qt::ElideRight, kMaxTitleWidth);
     m_titleLabel->setText(elided);
+    m_titleLabel->setFixedWidth(fm.horizontalAdvance(elided) + 4);
+    setFixedWidth(sizeHint().width());
 
     QString fullInfo = QString("%1 (%2 × %3 px)\n%4")
                            .arg(m_doc->fileName())
@@ -190,7 +182,7 @@ void DocumentTabItem::updateTab() {
     }
     setToolTip(fullInfo);
 
-    if (m_thumbDirty) {
+    if (m_thumbDirty && !m_thumbTimer.isActive()) {
         m_thumbTimer.start();
     }
 }

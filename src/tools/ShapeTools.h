@@ -1,6 +1,7 @@
 #pragma once
 
 #include "ITool.h"
+#include "LayerEdit.h"
 #include <QPointF>
 #include <QImage>
 
@@ -14,19 +15,31 @@ public:
     QString shortcut() const override { return "O"; }
     QCursor cursor() const override { return Qt::CrossCursor; }
 
+    void deactivate(Document* doc, ToolContext& ctx) override;
     void mousePress(QMouseEvent* event, Document* doc, const QPointF& docPos, ToolContext& ctx) override;
     void mouseMove(QMouseEvent* event, Document* doc, const QPointF& docPos, ToolContext& ctx) override;
     void mouseRelease(QMouseEvent* event, Document* doc, const QPointF& docPos, ToolContext& ctx) override;
+    void keyPress(QKeyEvent* event, Document* doc, ToolContext& ctx) override;
     void drawOverlay(QPainter& painter, const RenderOptions& opts) override;
 
+    // Outline of a shape inscribed in rect.
+    static QPainterPath shapePath(ShapeType type, const QRectF& rect);
+
 private:
-    void renderShape(QPainter& p, const QRectF& rect, const ToolContext& ctx);
+    void renderShape(QPainter& p, const QRectF& rect, qreal penWidth) const;
+    QRectF shapeRect(bool constrainSquare) const;
 
     QPointF m_startPos;
     QPointF m_currentPos;
     bool m_drawing = false;
-    QImage m_undoSnapshot;
-    ToolContext m_currentCtx;
+    bool m_constrain = false;
+    // Options captured when the drag started
+    ShapeType m_shapeType = ShapeType::Rectangle;
+    FillMode m_fillMode = FillMode::OutlineOnly;
+    QColor m_outlineColor;
+    QColor m_fillColor;
+    int m_penWidth = 2;
+    bool m_antiAliasing = true;
 };
 
 class LineCurveTool : public ITool {
@@ -53,6 +66,7 @@ public:
 
 private:
     void renderLine(QPainter& p, const ToolContext& ctx);
+    void setBaseLineEnd(const QPointF& docPos, bool constrainAngle);
     int hitTestHandle(const QPointF& docPos, double threshold) const;
     double distanceToCurve(const QPointF& docPos, double& outT) const;
 
@@ -71,7 +85,7 @@ private:
     QPointF m_c1;
     QPointF m_c2;
 
-    QImage m_undoSnapshot;
+    LayerEdit m_edit;
     ToolContext m_currentCtx;
 };
 

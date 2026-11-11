@@ -86,6 +86,7 @@ public:
 
 protected:
     void processPreview(QImage& image) override;
+    EffectApplier applier() const override;
 
 private:
     int m_levels = 16;
@@ -114,6 +115,7 @@ public:
 
 protected:
     void processPreview(QImage& image) override;
+    EffectApplier applier() const override;
 
 private:
     int m_hue = 0;
@@ -143,6 +145,7 @@ public:
 
 protected:
     void processPreview(QImage& image) override;
+    EffectApplier applier() const override;
 
 private:
     int m_temperature = 0;

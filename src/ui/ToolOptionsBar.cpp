@@ -5,6 +5,7 @@ namespace pdn {
 ToolOptionsBar::ToolOptionsBar(ToolManager* toolMgr, QWidget* parent)
     : QToolBar("Tool Options", parent), m_toolMgr(toolMgr) {
     setMovable(false);
+    setMinimumHeight(36); // keep the bar's height when a tool has no options
     setupWidgets();
     updateForTool(toolMgr->activeToolType());
 
@@ -22,6 +23,29 @@ void ToolOptionsBar::setupWidgets() {
     });
     connect(m_brushWidthSpin, &QSpinBox::editingFinished, this, [this]() {
         m_brushWidthSpin->clearFocus();
+    });
+
+    m_hardnessLabel = new QLabel(" Hardness: ", this);
+    m_hardnessSpin = new QSpinBox(this);
+    m_hardnessSpin->setRange(0, 100);
+    m_hardnessSpin->setSuffix("%");
+    m_hardnessSpin->setSingleStep(5);
+    m_hardnessSpin->setToolTip("Brush hardness: 100% paints a crisp edge, lower values fade out towards the edge");
+    m_hardnessSpin->setValue(m_toolMgr->context().brushHardness);
+    connect(m_hardnessSpin, QOverload<int>::of(&QSpinBox::valueChanged), this, [this](int val) {
+        m_toolMgr->context().brushHardness = val;
+    });
+    connect(m_hardnessSpin, &QSpinBox::editingFinished, this, [this]() { m_hardnessSpin->clearFocus(); });
+
+    m_blendModeLabel = new QLabel(" Blend: ", this);
+    m_blendModeCombo = new QComboBox(this);
+    m_blendModeCombo->setFocusPolicy(Qt::NoFocus);
+    m_blendModeCombo->setToolTip("How the painted colour is combined with the pixels already on the layer");
+    for (const BlendModeInfo& info : getAvailableBlendModes()) {
+        m_blendModeCombo->addItem(info.name, static_cast<int>(info.mode));
+    }
+    connect(m_blendModeCombo, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [this](int idx) {
+        m_toolMgr->context().brushBlendMode = static_cast<BlendMode>(m_blendModeCombo->itemData(idx).toInt());
     });
 
     // 2. Antialias
@@ -78,6 +102,15 @@ void ToolOptionsBar::setupWidgets() {
         m_toleranceValLabel->setText(QString("%1%").arg(val));
     });
 
+    m_floodModeCombo = new QComboBox(this);
+    m_floodModeCombo->setFocusPolicy(Qt::NoFocus);
+    m_floodModeCombo->setToolTip("Flood mode: only the connected area, or every similar pixel on the layer");
+    m_floodModeCombo->addItem("Contiguous", static_cast<int>(FloodMode::Contiguous));
+    m_floodModeCombo->addItem("Global", static_cast<int>(FloodMode::Global));
+    connect(m_floodModeCombo, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [this](int idx) {
+        m_toolMgr->context().floodMode = static_cast<FloodMode>(m_floodModeCombo->itemData(idx).toInt());
+    });
+
     // 5. Shapes & Fill Mode
     m_shapeTypeLabel = new QLabel(" Shape: ", this);
     m_shapeTypeCombo = new QComboBox(this);
@@ -88,6 +121,10 @@ void ToolOptionsBar::setupWidgets() {
     m_shapeTypeCombo->addItem("Diamond", static_cast<int>(ShapeType::Diamond));
     m_shapeTypeCombo->addItem("Triangle", static_cast<int>(ShapeType::Triangle));
     m_shapeTypeCombo->addItem("Star", static_cast<int>(ShapeType::Star));
+    m_shapeTypeCombo->addItem("Pentagon", static_cast<int>(ShapeType::Pentagon));
+    m_shapeTypeCombo->addItem("Hexagon", static_cast<int>(ShapeType::Hexagon));
+    m_shapeTypeCombo->addItem("Arrow", static_cast<int>(ShapeType::Arrow));
+    m_shapeTypeCombo->addItem("Heart", static_cast<int>(ShapeType::Heart));
     connect(m_shapeTypeCombo, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [this](int idx) {
         m_toolMgr->context().shapeType = static_cast<ShapeType>(m_shapeTypeCombo->itemData(idx).toInt());
     });
@@ -107,9 +144,11 @@ void ToolOptionsBar::setupWidgets() {
     m_gradientModeCombo = new QComboBox(this);
     m_gradientModeCombo->setFocusPolicy(Qt::NoFocus);
     m_gradientModeCombo->addItem("Linear", static_cast<int>(GradientMode::Linear));
+    m_gradientModeCombo->addItem("Linear (Reflected)", static_cast<int>(GradientMode::LinearReflected));
+    m_gradientModeCombo->addItem("Diamond", static_cast<int>(GradientMode::Diamond));
     m_gradientModeCombo->addItem("Radial", static_cast<int>(GradientMode::Radial));
     m_gradientModeCombo->addItem("Conical", static_cast<int>(GradientMode::Conical));
-    m_gradientModeCombo->addItem("Diamond", static_cast<int>(GradientMode::Diamond));
+    m_gradientModeCombo->addItem("Spiral", static_cast<int>(GradientMode::Spiral));
     connect(m_gradientModeCombo, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [this](int idx) {
         m_toolMgr->context().gradientMode = static_cast<GradientMode>(m_gradientModeCombo->itemData(idx).toInt());
     });
@@ -170,68 +209,88 @@ void ToolOptionsBar::setupWidgets() {
     });
 
     // Add all to toolbar
-    addWidget(m_brushWidthLabel);
-    addWidget(m_brushWidthSpin);
-    addWidget(m_antialiasBtn);
-    addWidget(m_compositionModeBtn);
-    addSeparator();
-    addWidget(m_selectionModeLabel);
-    addWidget(m_selectionModeCombo);
-    addSeparator();
-    addWidget(m_toleranceLabel);
-    addWidget(m_toleranceSlider);
-    addWidget(m_toleranceValLabel);
-    addSeparator();
-    addWidget(m_shapeTypeLabel);
-    addWidget(m_shapeTypeCombo);
-    addWidget(m_fillModeLabel);
-    addWidget(m_fillModeCombo);
-    addSeparator();
-    addWidget(m_gradientModeLabel);
-    addWidget(m_gradientModeCombo);
-    addSeparator();
-    addWidget(m_fontCombo);
-    addWidget(m_fontSizeCombo);
-    addWidget(m_boldBtn);
-    addWidget(m_italicBtn);
-    addWidget(m_underlineBtn);
+    addOption(m_brushWidthLabel);
+    addOption(m_brushWidthSpin);
+    addOption(m_hardnessLabel);
+    addOption(m_hardnessSpin);
+    addOption(m_antialiasBtn);
+    addOption(m_compositionModeBtn);
+    addOption(m_blendModeLabel);
+    addOption(m_blendModeCombo);
+    addOption(m_selectionModeLabel);
+    addOption(m_selectionModeCombo);
+    addOption(m_toleranceLabel);
+    addOption(m_toleranceSlider);
+    addOption(m_toleranceValLabel);
+    addOption(m_floodModeCombo);
+    addOption(m_shapeTypeLabel);
+    addOption(m_shapeTypeCombo);
+    addOption(m_fillModeLabel);
+    addOption(m_fillModeCombo);
+    addOption(m_gradientModeLabel);
+    addOption(m_gradientModeCombo);
+    addOption(m_fontCombo);
+    addOption(m_fontSizeCombo);
+    addOption(m_boldBtn);
+    addOption(m_italicBtn);
+    addOption(m_underlineBtn);
+}
+
+void ToolOptionsBar::addOption(QWidget* widget) {
+    m_optionActions.insert(widget, addWidget(widget));
+}
+
+void ToolOptionsBar::setOptionVisible(QWidget* widget, bool visible) {
+    // QToolBar owns the visibility of embedded widgets: QWidget::setVisible() has no lasting
+    // effect, the action that wraps the widget has to be toggled instead.
+    if (QAction* action = m_optionActions.value(widget)) {
+        action->setVisible(visible);
+    }
 }
 
 void ToolOptionsBar::updateForTool(ToolType type) {
-    bool isBrush = (type == ToolType::Paintbrush || type == ToolType::Eraser ||
-                    type == ToolType::CloneStamp || type == ToolType::Recolor ||
-                    type == ToolType::LineCurve || type == ToolType::Shapes);
-    m_brushWidthLabel->setVisible(isBrush);
-    m_brushWidthSpin->setVisible(isBrush);
-    m_antialiasBtn->setVisible(isBrush);
-    m_compositionModeBtn->setVisible(isBrush);
+    const bool hasWidth = (type == ToolType::Paintbrush || type == ToolType::Eraser ||
+                           type == ToolType::CloneStamp || type == ToolType::Recolor ||
+                           type == ToolType::LineCurve || type == ToolType::Shapes);
+    setOptionVisible(m_brushWidthLabel, hasWidth);
+    setOptionVisible(m_brushWidthSpin, hasWidth);
+    setOptionVisible(m_antialiasBtn, hasWidth || type == ToolType::Text);
+    // Only these tools honour the draw-over / overwrite choice
+    const bool hasHardness = (type == ToolType::Paintbrush || type == ToolType::Eraser || type == ToolType::CloneStamp);
+    setOptionVisible(m_hardnessLabel, hasHardness);
+    setOptionVisible(m_hardnessSpin, hasHardness);
+    const bool blendsColor = (type == ToolType::Paintbrush || type == ToolType::PaintBucket || type == ToolType::Gradient);
+    setOptionVisible(m_compositionModeBtn, blendsColor);
+    setOptionVisible(m_blendModeLabel, blendsColor);
+    setOptionVisible(m_blendModeCombo, blendsColor);
 
     bool isSelection = (type == ToolType::RectangleSelect || type == ToolType::EllipseSelect ||
                         type == ToolType::LassoSelect || type == ToolType::MagicWand);
-    m_selectionModeLabel->setVisible(isSelection);
-    m_selectionModeCombo->setVisible(isSelection);
+    setOptionVisible(m_selectionModeLabel, isSelection);
+    setOptionVisible(m_selectionModeCombo, isSelection);
 
     bool isTolerance = (type == ToolType::MagicWand || type == ToolType::PaintBucket || type == ToolType::Recolor);
-    m_toleranceLabel->setVisible(isTolerance);
-    m_toleranceSlider->setVisible(isTolerance);
-    m_toleranceValLabel->setVisible(isTolerance);
+    setOptionVisible(m_toleranceLabel, isTolerance);
+    setOptionVisible(m_toleranceSlider, isTolerance);
+    setOptionVisible(m_toleranceValLabel, isTolerance);
+    setOptionVisible(m_floodModeCombo, type == ToolType::MagicWand || type == ToolType::PaintBucket);
 
     bool isShapes = (type == ToolType::Shapes);
-    m_shapeTypeLabel->setVisible(isShapes);
-    m_shapeTypeCombo->setVisible(isShapes);
-    m_fillModeLabel->setVisible(isShapes);
-    m_fillModeCombo->setVisible(isShapes);
+    setOptionVisible(m_shapeTypeLabel, isShapes);
+    setOptionVisible(m_shapeTypeCombo, isShapes);
+    setOptionVisible(m_fillModeLabel, isShapes);
+    setOptionVisible(m_fillModeCombo, isShapes);
 
     bool isGradient = (type == ToolType::Gradient);
-    m_gradientModeLabel->setVisible(isGradient);
-    m_gradientModeCombo->setVisible(isGradient);
+    setOptionVisible(m_gradientModeLabel, isGradient);
+    setOptionVisible(m_gradientModeCombo, isGradient);
 
     bool isText = (type == ToolType::Text);
-    m_fontCombo->setVisible(isText);
-    m_fontSizeCombo->setVisible(isText);
-    m_boldBtn->setVisible(isText);
-    m_italicBtn->setVisible(isText);
-    m_underlineBtn->setVisible(isText);
+    setOptionVisible(m_fontCombo, isText);
+    setOptionVisible(m_fontSizeCombo, isText);
+    setOptionVisible(m_boldBtn, isText);
+    setOptionVisible(m_italicBtn, isText);
+    setOptionVisible(m_underlineBtn, isText);
 }
 
 } // namespace pdn

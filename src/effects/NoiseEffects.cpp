@@ -1,4 +1,5 @@
 #include "NoiseEffects.h"
+#include "../core/Parallel.h"
 #include <random>
 #include <cmath>
 #include <algorithm>
@@ -16,16 +17,17 @@ void AddNoiseEffect::process(QImage& image, const Selection& selection, int inte
     int h = image.height();
     if (w <= 0 || h <= 0) return;
 
-    // Fixed seed for consistent preview or standard RNG
-    std::mt19937 rng(42);
-    std::uniform_real_distribution<double> distProb(0.0, 100.0);
     double maxDelta = intensity * 2.55;
-    std::uniform_real_distribution<double> distDelta(-maxDelta, maxDelta);
 
     double satFactor = colorSaturation / 100.0;
     double covThreshold = static_cast<double>(coverage);
 
-    for (int y = 0; y < h; ++y) {
+    image.detach(); // worker threads must not trigger a copy-on-write
+    parallelRows(h, [&](int y) {
+        // Seeded per row: the noise is reproducible (stable preview) and rows are independent
+        std::mt19937 rng(42u + static_cast<unsigned>(y) * 7919u);
+        std::uniform_real_distribution<double> distProb(0.0, 100.0);
+        std::uniform_real_distribution<double> distDelta(-maxDelta, maxDelta);
         uint32_t* line = reinterpret_cast<uint32_t*>(image.scanLine(y));
         for (int x = 0; x < w; ++x) {
             if (!selection.isEmpty() && !selection.containsPixel(x, y)) continue;
@@ -53,10 +55,11 @@ void AddNoiseEffect::process(QImage& image, const Selection& selection, int inte
                 line[x] = a | (outR << 16) | (outG << 8) | outB;
             }
         }
-    }
+    });
 }
 
 bool AddNoiseEffect::apply(QImage& image, const Selection& selection) {
+    if (applyRemembered(image, selection)) return true;
     process(image, selection, 64, 100, 100);
     return true;
 }
@@ -64,7 +67,7 @@ bool AddNoiseEffect::apply(QImage& image, const Selection& selection) {
 bool AddNoiseEffect::showDialog(QWidget* parent, Document* doc) {
     if (!doc || !doc->activeLayer()) return false;
     AddNoiseDialog dlg(doc, parent);
-    return dlg.exec() == QDialog::Accepted;
+    return runDialog(dlg);
 }
 
 AddNoiseDialog::AddNoiseDialog(Document* doc, QWidget* parent)
@@ -81,6 +84,12 @@ void AddNoiseDialog::processPreview(QImage& image) {
     AddNoiseEffect::process(image, m_doc->selection(), m_intensity, m_colorSaturation, m_coverage);
 }
 
+EffectApplier AddNoiseDialog::applier() const {
+    return [p0 = m_intensity, p1 = m_colorSaturation, p2 = m_coverage](QImage& image, const Selection& selection) {
+        AddNoiseEffect::process(image, selection, p0, p1, p2);
+    };
+}
+
 // ==========================================
 // Median
 // ==========================================
@@ -95,14 +104,12 @@ void MedianEffect::process(QImage& image, const Selection& selection, int radius
     int r = std::clamp(radius, 1, 20);
     int p = std::clamp(percentile, 0, 100);
 
-    std::vector<uint8_t> valsR;
-    std::vector<uint8_t> valsG;
-    std::vector<uint8_t> valsB;
-    valsR.reserve((2 * r + 1) * (2 * r + 1));
-    valsG.reserve((2 * r + 1) * (2 * r + 1));
-    valsB.reserve((2 * r + 1) * (2 * r + 1));
-
-    for (int y = 0; y < h; ++y) {
+    image.detach(); // worker threads must not trigger a copy-on-write
+    parallelRows(h, [&](int y) {
+        std::vector<uint8_t> valsR, valsG, valsB; // per-row scratch space
+        valsR.reserve((2 * r + 1) * (2 * r + 1));
+        valsG.reserve((2 * r + 1) * (2 * r + 1));
+        valsB.reserve((2 * r + 1) * (2 * r + 1));
         uint32_t* dstLine = reinterpret_cast<uint32_t*>(image.scanLine(y));
         for (int x = 0; x < w; ++x) {
             if (!selection.isEmpty() && !selection.containsPixel(x, y)) continue;
@@ -131,10 +138,11 @@ void MedianEffect::process(QImage& image, const Selection& selection, int radius
             uint32_t a = src.pixel(x, y) & 0xFF000000;
             dstLine[x] = a | (valsR[k] << 16) | (valsG[k] << 8) | valsB[k];
         }
-    }
+    });
 }
 
 bool MedianEffect::apply(QImage& image, const Selection& selection) {
+    if (applyRemembered(image, selection)) return true;
     process(image, selection, 2, 50);
     return true;
 }
@@ -142,7 +150,7 @@ bool MedianEffect::apply(QImage& image, const Selection& selection) {
 bool MedianEffect::showDialog(QWidget* parent, Document* doc) {
     if (!doc || !doc->activeLayer()) return false;
     MedianDialog dlg(doc, parent);
-    return dlg.exec() == QDialog::Accepted;
+    return runDialog(dlg);
 }
 
 MedianDialog::MedianDialog(Document* doc, QWidget* parent)
@@ -156,6 +164,12 @@ MedianDialog::MedianDialog(Document* doc, QWidget* parent)
 
 void MedianDialog::processPreview(QImage& image) {
     MedianEffect::process(image, m_doc->selection(), m_radius, m_percentile);
+}
+
+EffectApplier MedianDialog::applier() const {
+    return [p0 = m_radius, p1 = m_percentile](QImage& image, const Selection& selection) {
+        MedianEffect::process(image, selection, p0, p1);
+    };
 }
 
 } // namespace pdn

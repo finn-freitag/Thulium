@@ -7,6 +7,7 @@
 #include "NoiseEffects.h"
 #include "PhotoEffects.h"
 #include "StylizeEffects.h"
+#include "ParametricEffect.h"
 #include <QDir>
 #include <QSet>
 
@@ -48,6 +49,11 @@ PluginManager::PluginManager(QObject* parent) : QObject(parent) {
     // Stylize
     registerEffect(std::make_shared<EdgeDetectEffect>());
     registerEffect(std::make_shared<EmbossEffect>());
+
+    // Data-driven effects (see MoreEffects.cpp)
+    for (const auto& effect : createParametricEffects()) {
+        registerEffect(effect);
+    }
 }
 
 void PluginManager::registerEffect(std::shared_ptr<IEffect> effect) {

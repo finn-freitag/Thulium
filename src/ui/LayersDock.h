@@ -3,6 +3,7 @@
 #include <QDockWidget>
 #include <QListWidget>
 #include <QToolButton>
+#include <QTimer>
 #include <memory>
 #include "../core/Document.h"
 
@@ -31,6 +32,8 @@ private slots:
 
 private:
     void setupUI();
+    void refreshThumbnails();
+    static QIcon layerThumbnail(const Layer& layer);
 
     std::shared_ptr<Document> m_doc;
     QListWidget* m_listWidget;
@@ -43,6 +46,7 @@ private:
     QToolButton* m_moveDownBtn;
     QToolButton* m_propertiesBtn;
 
+    QTimer m_thumbTimer; // throttles thumbnail refreshes while pixels are being edited
     bool m_updating = false;
 };
 

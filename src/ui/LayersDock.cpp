@@ -20,6 +20,27 @@ LayersDock::LayersDock(QWidget* parent) : QDockWidget("Layers", parent) {
     setAllowedAreas(Qt::LeftDockWidgetArea | Qt::RightDockWidgetArea);
     initResources();
     setupUI();
+
+    m_thumbTimer.setSingleShot(true);
+    m_thumbTimer.setInterval(250);
+    connect(&m_thumbTimer, &QTimer::timeout, this, &LayersDock::refreshThumbnails);
+}
+
+QIcon LayersDock::layerThumbnail(const Layer& layer) {
+    // Nearest-neighbour sampling touches ~1000 pixels regardless of the layer's size
+    return QIcon(QPixmap::fromImage(layer.image().scaled(32, 32, Qt::KeepAspectRatio, Qt::FastTransformation)));
+}
+
+void LayersDock::refreshThumbnails() {
+    if (!m_doc) return;
+    m_updating = true;
+    for (int row = 0; row < m_listWidget->count(); ++row) {
+        QListWidgetItem* item = m_listWidget->item(row);
+        if (auto layer = m_doc->layer(item->data(Qt::UserRole).toInt())) {
+            item->setIcon(layerThumbnail(*layer));
+        }
+    }
+    m_updating = false;
 }
 
 void LayersDock::setupUI() {
@@ -120,7 +141,10 @@ void LayersDock::setDocument(std::shared_ptr<Document> doc) {
         connect(m_doc.get(), &Document::layerCountChanged, this, &LayersDock::refreshLayerList);
         connect(m_doc.get(), &Document::activeLayerChanged, this, &LayersDock::refreshLayerList);
         connect(m_doc.get(), &Document::layerPropertiesChanged, this, &LayersDock::refreshLayerList);
-        connect(m_doc.get(), &Document::documentChanged, this, &LayersDock::refreshLayerList);
+        // Pixel edits only need new thumbnails, and those can lag behind a little
+        connect(m_doc.get(), &Document::pixelsChanged, this, [this]() {
+            if (!m_thumbTimer.isActive()) m_thumbTimer.start();
+        });
     }
     refreshLayerList();
 }
@@ -146,9 +170,7 @@ void LayersDock::refreshLayerList() {
         item->setCheckState(layer->isVisible() ? Qt::Checked : Qt::Unchecked);
         item->setData(Qt::UserRole, i);
 
-        // Thumbnail
-        QPixmap thumb = QPixmap::fromImage(layer->image().scaled(32, 32, Qt::KeepAspectRatio, Qt::FastTransformation));
-        item->setIcon(QIcon(thumb));
+        item->setIcon(layerThumbnail(*layer));
 
         m_listWidget->addItem(item);
 

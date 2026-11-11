@@ -1,4 +1,5 @@
 #include "StylizeEffects.h"
+#include "../core/Parallel.h"
 #include <cmath>
 #include <algorithm>
 #include <vector>
@@ -16,7 +17,8 @@ void EdgeDetectEffect::process(QImage& image, const Selection& selection, int se
     QImage src = image.copy();
     double sens = sensitivity / 2.0;
 
-    for (int y = 0; y < h; ++y) {
+    image.detach(); // worker threads must not trigger a copy-on-write
+    parallelRows(h, [&](int y) {
         uint32_t* dstLine = reinterpret_cast<uint32_t*>(image.scanLine(y));
         int y0 = std::max(0, y - 1);
         int y1 = y;
@@ -68,10 +70,11 @@ void EdgeDetectEffect::process(QImage& image, const Selection& selection, int se
             uint32_t a = line1[x] & 0xFF000000;
             dstLine[x] = a | (outR << 16) | (outG << 8) | outB;
         }
-    }
+    });
 }
 
 bool EdgeDetectEffect::apply(QImage& image, const Selection& selection) {
+    if (applyRemembered(image, selection)) return true;
     process(image, selection, 5);
     return true;
 }
@@ -79,7 +82,7 @@ bool EdgeDetectEffect::apply(QImage& image, const Selection& selection) {
 bool EdgeDetectEffect::showDialog(QWidget* parent, Document* doc) {
     if (!doc || !doc->activeLayer()) return false;
     EdgeDetectDialog dlg(doc, parent);
-    return dlg.exec() == QDialog::Accepted;
+    return runDialog(dlg);
 }
 
 EdgeDetectDialog::EdgeDetectDialog(Document* doc, QWidget* parent)
@@ -92,6 +95,12 @@ EdgeDetectDialog::EdgeDetectDialog(Document* doc, QWidget* parent)
 
 void EdgeDetectDialog::processPreview(QImage& image) {
     EdgeDetectEffect::process(image, m_doc->selection(), m_sensitivity);
+}
+
+EffectApplier EdgeDetectDialog::applier() const {
+    return [p0 = m_sensitivity](QImage& image, const Selection& selection) {
+        EdgeDetectEffect::process(image, selection, p0);
+    };
 }
 
 // ==========================================
@@ -107,7 +116,8 @@ void EmbossEffect::process(QImage& image, const Selection& selection, int angle)
     int dx = static_cast<int>(std::round(std::cos(rad)));
     int dy = static_cast<int>(std::round(std::sin(rad)));
 
-    for (int y = 0; y < h; ++y) {
+    image.detach(); // worker threads must not trigger a copy-on-write
+    parallelRows(h, [&](int y) {
         uint32_t* dstLine = reinterpret_cast<uint32_t*>(image.scanLine(y));
 
         int yP = std::clamp(y + dy, 0, h - 1);
@@ -141,10 +151,11 @@ void EmbossEffect::process(QImage& image, const Selection& selection, int angle)
             uint32_t a = src.pixel(x, y) & 0xFF000000;
             dstLine[x] = a | (outVal << 16) | (outVal << 8) | outVal;
         }
-    }
+    });
 }
 
 bool EmbossEffect::apply(QImage& image, const Selection& selection) {
+    if (applyRemembered(image, selection)) return true;
     process(image, selection, 45);
     return true;
 }
@@ -152,7 +163,7 @@ bool EmbossEffect::apply(QImage& image, const Selection& selection) {
 bool EmbossEffect::showDialog(QWidget* parent, Document* doc) {
     if (!doc || !doc->activeLayer()) return false;
     EmbossDialog dlg(doc, parent);
-    return dlg.exec() == QDialog::Accepted;
+    return runDialog(dlg);
 }
 
 EmbossDialog::EmbossDialog(Document* doc, QWidget* parent)
@@ -167,6 +178,12 @@ void EmbossDialog::processPreview(QImage& image) {
     EmbossEffect::process(image, m_doc->selection(), m_angle);
 }
 
+EffectApplier EmbossDialog::applier() const {
+    return [p0 = m_angle](QImage& image, const Selection& selection) {
+        EmbossEffect::process(image, selection, p0);
+    };
+}
+
 // ==========================================
 // Oil Painting (Artistic)
 // ==========================================
@@ -179,12 +196,13 @@ void OilPaintingEffect::process(QImage& image, const Selection& selection, int b
     int r = std::clamp(brushSize, 1, 8);
     int numBins = std::clamp(coarseness, 3, 100);
 
-    std::vector<int> counts(numBins + 1);
-    std::vector<uint32_t> sumR(numBins + 1);
-    std::vector<uint32_t> sumG(numBins + 1);
-    std::vector<uint32_t> sumB(numBins + 1);
-
-    for (int y = 0; y < h; ++y) {
+    image.detach(); // worker threads must not trigger a copy-on-write
+    parallelRows(h, [&](int y) {
+        // Histogram scratch space, one set per row so rows can run on different threads
+        std::vector<int> counts(numBins + 1);
+        std::vector<uint32_t> sumR(numBins + 1);
+        std::vector<uint32_t> sumG(numBins + 1);
+        std::vector<uint32_t> sumB(numBins + 1);
         uint32_t* dstLine = reinterpret_cast<uint32_t*>(image.scanLine(y));
         for (int x = 0; x < w; ++x) {
             if (!selection.isEmpty() && !selection.containsPixel(x, y)) continue;
@@ -233,10 +251,11 @@ void OilPaintingEffect::process(QImage& image, const Selection& selection, int b
                 dstLine[x] = a | (outR << 16) | (outG << 8) | outB;
             }
         }
-    }
+    });
 }
 
 bool OilPaintingEffect::apply(QImage& image, const Selection& selection) {
+    if (applyRemembered(image, selection)) return true;
     process(image, selection, 3, 50);
     return true;
 }
@@ -244,7 +263,7 @@ bool OilPaintingEffect::apply(QImage& image, const Selection& selection) {
 bool OilPaintingEffect::showDialog(QWidget* parent, Document* doc) {
     if (!doc || !doc->activeLayer()) return false;
     OilPaintingDialog dlg(doc, parent);
-    return dlg.exec() == QDialog::Accepted;
+    return runDialog(dlg);
 }
 
 OilPaintingDialog::OilPaintingDialog(Document* doc, QWidget* parent)
@@ -258,6 +277,12 @@ OilPaintingDialog::OilPaintingDialog(Document* doc, QWidget* parent)
 
 void OilPaintingDialog::processPreview(QImage& image) {
     OilPaintingEffect::process(image, m_doc->selection(), m_brushSize, m_coarseness);
+}
+
+EffectApplier OilPaintingDialog::applier() const {
+    return [p0 = m_brushSize, p1 = m_coarseness](QImage& image, const Selection& selection) {
+        OilPaintingEffect::process(image, selection, p0, p1);
+    };
 }
 
 } // namespace pdn

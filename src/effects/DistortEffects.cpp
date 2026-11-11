@@ -1,4 +1,5 @@
 #include "DistortEffects.h"
+#include "../core/Parallel.h"
 #include <cmath>
 #include <algorithm>
 #include <vector>
@@ -61,6 +62,7 @@ void PixelateEffect::process(QImage& image, const Selection& selection, int cell
 }
 
 bool PixelateEffect::apply(QImage& image, const Selection& selection) {
+    if (applyRemembered(image, selection)) return true;
     process(image, selection, 4);
     return true;
 }
@@ -68,7 +70,7 @@ bool PixelateEffect::apply(QImage& image, const Selection& selection) {
 bool PixelateEffect::showDialog(QWidget* parent, Document* doc) {
     if (!doc || !doc->activeLayer()) return false;
     PixelateDialog dlg(doc, parent);
-    return dlg.exec() == QDialog::Accepted;
+    return runDialog(dlg);
 }
 
 PixelateDialog::PixelateDialog(Document* doc, QWidget* parent)
@@ -81,6 +83,12 @@ PixelateDialog::PixelateDialog(Document* doc, QWidget* parent)
 
 void PixelateDialog::processPreview(QImage& image) {
     PixelateEffect::process(image, m_doc->selection(), m_cellSize);
+}
+
+EffectApplier PixelateDialog::applier() const {
+    return [p0 = m_cellSize](QImage& image, const Selection& selection) {
+        PixelateEffect::process(image, selection, p0);
+    };
 }
 
 // ==========================================
@@ -100,7 +108,8 @@ void TwistEffect::process(QImage& image, const Selection& selection, int amount,
     double radius = (maxDim * 0.5) * (std::clamp(size, 1, 100) / 100.0);
     double maxAngle = (amount / 100.0) * M_PI * 2.0;
 
-    for (int y = 0; y < h; ++y) {
+    image.detach(); // worker threads must not trigger a copy-on-write
+    parallelRows(h, [&](int y) {
         uint32_t* dstLine = reinterpret_cast<uint32_t*>(image.scanLine(y));
         for (int x = 0; x < w; ++x) {
             if (!selection.isEmpty() && !selection.containsPixel(x, y)) continue;
@@ -125,10 +134,11 @@ void TwistEffect::process(QImage& image, const Selection& selection, int amount,
                 dstLine[x] = srcLine[sx];
             }
         }
-    }
+    });
 }
 
 bool TwistEffect::apply(QImage& image, const Selection& selection) {
+    if (applyRemembered(image, selection)) return true;
     process(image, selection, 45, 50);
     return true;
 }
@@ -136,7 +146,7 @@ bool TwistEffect::apply(QImage& image, const Selection& selection) {
 bool TwistEffect::showDialog(QWidget* parent, Document* doc) {
     if (!doc || !doc->activeLayer()) return false;
     TwistDialog dlg(doc, parent);
-    return dlg.exec() == QDialog::Accepted;
+    return runDialog(dlg);
 }
 
 TwistDialog::TwistDialog(Document* doc, QWidget* parent)
@@ -221,6 +231,12 @@ void TwistDialog::onReset() {
 
 void TwistDialog::processPreview(QImage& image) {
     TwistEffect::process(image, m_doc->selection(), m_amount, m_size, m_center);
+}
+
+EffectApplier TwistDialog::applier() const {
+    return [p0 = m_amount, p1 = m_size, p2 = m_center](QImage& image, const Selection& selection) {
+        TwistEffect::process(image, selection, p0, p1, p2);
+    };
 }
 
 } // namespace pdn

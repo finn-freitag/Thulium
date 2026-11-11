@@ -19,10 +19,20 @@ EffectDialog::EffectDialog(Document* doc, const QString& effectName, QWidget* pa
 
     m_layerIndex = m_doc ? m_doc->activeLayerIndex() : -1;
     if (m_doc && m_doc->activeLayer()) {
-        m_originalImage = m_doc->activeLayer()->image().copy();
+        m_originalImage = m_doc->activeLayer()->image(); // implicitly shared, never modified
     }
 
     m_mainLayout = new QVBoxLayout(this);
+
+    m_previewTimer.setSingleShot(true);
+    m_previewTimer.setInterval(0);
+    connect(&m_previewTimer, &QTimer::timeout, this, &EffectDialog::renderPreviewNow);
+}
+
+bool IEffect::runDialog(EffectDialog& dialog) {
+    if (dialog.exec() != QDialog::Accepted) return false;
+    m_remembered = dialog.applier();
+    return true;
 }
 
 EffectDialog::~EffectDialog() {
@@ -171,6 +181,13 @@ void EffectDialog::onReset() {
 }
 
 void EffectDialog::updatePreview() {
+    // Rendering happens once control returns to the event loop, so a burst of slider
+    // changes renders a single preview instead of one per intermediate value.
+    m_previewTimer.start();
+}
+
+void EffectDialog::renderPreviewNow() {
+    m_previewTimer.stop();
     if (!m_doc || m_layerIndex < 0) return;
     auto layer = m_doc->layer(m_layerIndex);
     if (!layer) return;
@@ -178,7 +195,7 @@ void EffectDialog::updatePreview() {
     QImage copy = m_originalImage.copy();
     processPreview(copy);
     layer->setImage(copy);
-    emit m_doc->documentChanged();
+    m_doc->notifyPixelsChanged(copy.rect());
 }
 
 void EffectDialog::reject() {
@@ -188,11 +205,12 @@ void EffectDialog::reject() {
         m_bridge->requestCanvasRepaint();
     }
 
+    m_previewTimer.stop();
     if (m_doc && m_layerIndex >= 0) {
         auto layer = m_doc->layer(m_layerIndex);
         if (layer) {
-            layer->setImage(m_originalImage.copy());
-            emit m_doc->documentChanged();
+            layer->setImage(m_originalImage);
+            m_doc->notifyPixelsChanged(m_originalImage.rect());
         }
     }
     QDialog::reject();
@@ -205,6 +223,9 @@ void EffectDialog::accept() {
         m_bridge->requestCanvasRepaint();
     }
 
+    if (m_previewTimer.isActive()) {
+        renderPreviewNow(); // make sure the layer shows the final settings
+    }
     if (m_doc && m_layerIndex >= 0) {
         m_doc->undoStack()->push(new LayerBitmapUndoCommand(m_doc, m_layerIndex, m_originalImage, m_effectName));
     }
@@ -215,12 +236,12 @@ bool applyInstantEffect(Document* doc, const QString& name,
                         const std::function<void(QImage&, const Selection&)>& processFunc) {
     if (!doc || !doc->activeLayer()) return false;
     int layerIdx = doc->activeLayerIndex();
-    QImage original = doc->activeLayer()->image().copy();
+    const QImage original = doc->activeLayer()->image();
     QImage copy = original.copy();
     processFunc(copy, doc->selection());
     doc->activeLayer()->setImage(copy);
     doc->undoStack()->push(new LayerBitmapUndoCommand(doc, layerIdx, original, name));
-    emit doc->documentChanged();
+    doc->notifyPixelsChanged(copy.rect());
     return true;
 }
 

@@ -10,10 +10,14 @@
 #include "../effects/NoiseEffects.h"
 #include "../effects/PhotoEffects.h"
 #include "../effects/StylizeEffects.h"
+#include "../effects/ParametricEffect.h"
 #include "../core/History.h"
 #include "../tools/TextTool.h"
 #include "../tools/ShapeTools.h"
 #include "../tools/MoveTools.h"
+#include "../tools/LayerEdit.h"
+#include <QPainter>
+#include <QSettings>
 #include <QMenuBar>
 #include <QStatusBar>
 #include <QFileDialog>
@@ -330,9 +334,11 @@ bool MainWindow::openFile(const QString& filePath) {
     QString err;
     auto doc = ImageIO::openDocument(filePath, &err);
     if (!doc) {
+        removeRecentFile(filePath); // e.g. a recent file that has been moved or deleted
         QMessageBox::critical(this, "Error Opening File", err);
         return false;
     }
+    addRecentFile(filePath);
 
     clearLastCopied();
 
@@ -346,6 +352,62 @@ bool MainWindow::openFile(const QString& filePath) {
 
     addDocument(doc, true);
     return true;
+}
+
+// --- Recently opened files (persisted with QSettings) ---
+
+static const char* const kRecentFilesKey = "recentFiles";
+static constexpr int kMaxRecentFiles = 10;
+
+// Settings are only stored for the real application (main() names it); unnamed test
+// processes leave nothing behind on disk.
+static bool recentFilesEnabled() {
+    return !QCoreApplication::organizationName().isEmpty();
+}
+
+void MainWindow::addRecentFile(const QString& filePath) {
+    if (!recentFilesEnabled()) return;
+    const QString path = QFileInfo(filePath).absoluteFilePath();
+    QSettings settings;
+    QStringList files = settings.value(kRecentFilesKey).toStringList();
+    files.removeAll(path);
+    files.prepend(path);
+    while (files.size() > kMaxRecentFiles) files.removeLast();
+    settings.setValue(kRecentFilesKey, files);
+    rebuildRecentMenu();
+}
+
+void MainWindow::removeRecentFile(const QString& filePath) {
+    if (!recentFilesEnabled()) return;
+    QSettings settings;
+    QStringList files = settings.value(kRecentFilesKey).toStringList();
+    if (files.removeAll(QFileInfo(filePath).absoluteFilePath()) > 0) {
+        settings.setValue(kRecentFilesKey, files);
+        rebuildRecentMenu();
+    }
+}
+
+void MainWindow::rebuildRecentMenu() {
+    if (!m_recentMenu) return;
+    m_recentMenu->clear();
+    const QStringList files = recentFilesEnabled() ? QSettings().value(kRecentFilesKey).toStringList() : QStringList();
+    int number = 1;
+    for (const QString& path : files) {
+        // "&" in a file name would otherwise be read as a keyboard mnemonic
+        const QString label = QString("&%1  %2").arg(number++ % 10).arg(QFileInfo(path).fileName().replace("&", "&&"));
+        QAction* action = m_recentMenu->addAction(label, this, [this, path]() { openFile(path); });
+        action->setToolTip(path);
+        action->setStatusTip(path);
+    }
+    m_recentMenu->setToolTipsVisible(true);
+    if (!files.isEmpty()) {
+        m_recentMenu->addSeparator();
+        m_recentMenu->addAction("&Clear List", this, [this]() {
+            QSettings().remove(kRecentFilesKey);
+            rebuildRecentMenu();
+        });
+    }
+    m_recentMenu->setEnabled(!files.isEmpty());
 }
 
 void MainWindow::updateTitle() {
@@ -409,6 +471,8 @@ void MainWindow::setupMenus() {
     QMenu* fileMenu = mb->addMenu("&File");
     fileMenu->addAction("&New...", this, &MainWindow::onNew, QKeySequence::New);
     fileMenu->addAction("&Open...", this, &MainWindow::onOpen, QKeySequence::Open);
+    m_recentMenu = fileMenu->addMenu("Open &Recent");
+    rebuildRecentMenu();
     fileMenu->addSeparator();
     fileMenu->addAction("&Save", this, &MainWindow::onSave, QKeySequence::Save);
     fileMenu->addAction("Save &As...", this, &MainWindow::onSaveAs, QKeySequence::SaveAs);
@@ -435,8 +499,10 @@ void MainWindow::setupMenus() {
     editMenu->addSeparator();
     editMenu->addAction("Cu&t", this, &MainWindow::onCut, QKeySequence::Cut);
     editMenu->addAction("&Copy", this, &MainWindow::onCopy, QKeySequence::Copy);
+    editMenu->addAction("Copy &Merged", this, &MainWindow::onCopyMerged, QKeySequence("Ctrl+Shift+C"));
     editMenu->addAction("&Paste", this, &MainWindow::onPaste, QKeySequence::Paste);
     editMenu->addAction("Paste into &New Layer", this, &MainWindow::onPasteIntoNewLayer, QKeySequence("Ctrl+Shift+V"));
+    editMenu->addAction("Paste into New &Image", this, &MainWindow::onPasteIntoNewImage, QKeySequence("Ctrl+Alt+V"));
     editMenu->addSeparator();
     editMenu->addAction("&Erase Selection", this, &MainWindow::onEraseSelection, QKeySequence::Delete);
     editMenu->addAction("&Fill Selection", this, &MainWindow::onFillSelection, QKeySequence(Qt::Key_Backspace));
@@ -454,6 +520,7 @@ void MainWindow::setupMenus() {
     QAction* actualSizeAct = viewMenu->addAction("&Actual Size", m_canvasView, &CanvasView::zoomActualSize);
     actualSizeAct->setShortcuts({QKeySequence("Ctrl+0"), QKeySequence("Ctrl+Alt+0")});
     viewMenu->addAction("Zoom to &Window", m_canvasView, &CanvasView::zoomToWindow, QKeySequence("Ctrl+B"));
+    viewMenu->addAction("Zoom to &Selection", this, &MainWindow::onZoomToSelection, QKeySequence("Ctrl+Shift+B"));
     viewMenu->addSeparator();
     QAction* gridAct = viewMenu->addAction("&Grid", m_canvasView, &CanvasView::togglePixelGrid);
     gridAct->setCheckable(true);
@@ -482,6 +549,15 @@ void MainWindow::setupMenus() {
     delLayerAct->setShortcut(QKeySequence("Ctrl+Shift+Delete"));
     layersMenu->addAction(QIcon(":/icons/layer-duplicate.svg"), "&Duplicate Layer", this, &MainWindow::onDuplicateLayer, QKeySequence("Ctrl+Shift+D"));
     layersMenu->addAction(QIcon(":/icons/layer-merge-down.svg"), "&Merge Layer Down", this, &MainWindow::onMergeDown, QKeySequence("Ctrl+M"));
+    layersMenu->addAction("&Import From File...", this, &MainWindow::onImportLayerFromFile);
+    layersMenu->addSeparator();
+    layersMenu->addAction("Flip &Horizontal", this, [this]() { onFlipLayer(Qt::Horizontal); });
+    layersMenu->addAction("Flip &Vertical", this, [this]() { onFlipLayer(Qt::Vertical); });
+    layersMenu->addSeparator();
+    layersMenu->addAction("Move Layer to &Top", this, [this]() { if (m_doc) onMoveLayer(m_doc->layerCount() - 1); });
+    layersMenu->addAction(QIcon(":/icons/layer-move-up.svg"), "Move Layer &Up", this, [this]() { if (m_doc) onMoveLayer(m_doc->activeLayerIndex() + 1); });
+    layersMenu->addAction(QIcon(":/icons/layer-move-down.svg"), "Move Layer Do&wn", this, [this]() { if (m_doc) onMoveLayer(m_doc->activeLayerIndex() - 1); });
+    layersMenu->addAction("Move Layer to &Bottom", this, [this]() { onMoveLayer(0); });
     layersMenu->addSeparator();
     layersMenu->addAction(QIcon(":/icons/layer-properties.svg"), "Layer &Properties...", this, &MainWindow::onLayerProperties, QKeySequence("F4"));
 
@@ -533,6 +609,33 @@ void MainWindow::setupMenus() {
     QMenu* stylizeMenu = fxMenu->addMenu("&Stylize");
     stylizeMenu->addAction("&Edge Detect...", this, &MainWindow::onEdgeDetect);
     stylizeMenu->addAction("&Emboss...", this, &MainWindow::onEmboss);
+
+    // Effects that are described by data register themselves with the plugin manager; give
+    // each one a menu entry in the submenu of its category.
+    QMap<QString, QMenu*> effectMenus = {{"Artistic", artisticMenu}, {"Blurs", blursMenu}, {"Distort", distortMenu},
+                                         {"Noise", noiseMenu}, {"Photo", photoMenu}, {"Stylize", stylizeMenu}};
+    for (const auto& effect : createParametricEffects()) {
+        QMenu* menu = adjMenu;
+        if (effect->category() != "Adjustments") {
+            menu = effectMenus.value(effect->category());
+            if (!menu) {
+                menu = fxMenu->addMenu(effect->category());
+                effectMenus.insert(effect->category(), menu);
+            }
+        }
+        menu->addAction(effect->name() + "...", this, [this, effect]() { runEffect(effect); });
+    }
+    for (QMenu* menu : effectMenus) {
+        // Keep every submenu alphabetical, whichever way its entries were added
+        QList<QAction*> actions = menu->actions();
+        std::sort(actions.begin(), actions.end(), [](QAction* a, QAction* b) {
+            return a->text().remove('&').compare(b->text().remove('&'), Qt::CaseInsensitive) < 0;
+        });
+        for (QAction* action : actions) {
+            menu->removeAction(action);
+            menu->addAction(action);
+        }
+    }
 
     // --- Window Menu ---
     m_windowMenu = mb->addMenu("&Window");
@@ -675,6 +778,7 @@ bool MainWindow::saveDocumentAs(int index) {
         return false;
     }
     doc->setFilePath(file);
+    addRecentFile(file);
     doc->undoStack()->setClean();
     if (m_doc == doc) updateTitle();
     m_documentStrip->updateDocument(index);
@@ -733,106 +837,114 @@ void MainWindow::onMetadata() {
     }
 }
 
-void MainWindow::onCut() {
-    if (!m_doc) return;
+// Clears (color == nullptr) or fills the selected area of the active layer; the whole layer
+// if nothing is selected. Returns false if there was nothing to edit.
+static bool paintSelectedArea(Document* doc, const QColor* color, const QString& actionName) {
+    LayerEdit edit;
+    if (!edit.begin(doc)) return false;
+    const QRect layerRect = edit.layer()->image().rect();
+    const QRect area = doc->selection().isEmpty() ? layerRect
+                                                  : doc->selection().region().boundingRect().intersected(layerRect);
+    if (area.isEmpty()) return false;
 
-    if (m_doc->hasFloatingSelection()) {
-        onCopy();
-        m_doc->undoStack()->beginMacro("Cut");
-        QRegion oldRegion = m_doc->selection().region();
-        m_doc->discardFloatingSelection();
-        m_doc->clearSelection();
-        if (!oldRegion.isEmpty()) {
-            m_doc->undoStack()->push(new SelectionUndoCommand(m_doc.get(), oldRegion, QRegion(), "Deselect"));
+    edit.prepare(area);
+    {
+        QPainter p(&edit.layer()->image());
+        if (!doc->selection().isEmpty()) {
+            p.setClipRegion(doc->selection().region());
         }
-        m_doc->undoStack()->endMacro();
-        return;
-    }
-
-    onCopy();
-    m_doc->undoStack()->beginMacro("Cut");
-    auto layer = m_doc->activeLayer();
-    if (layer) {
-        QImage oldImg = layer->image().copy();
-        QPainter p(&layer->image());
-        p.setCompositionMode(QPainter::CompositionMode_Clear);
-        if (!m_doc->selection().isEmpty()) {
-            p.fillPath(m_doc->selection().path(), Qt::transparent);
+        if (color) {
+            p.fillRect(area, *color);
         } else {
-            layer->clear();
+            p.setCompositionMode(QPainter::CompositionMode_Clear);
+            p.fillRect(area, Qt::transparent);
         }
-        p.end();
-
-        m_doc->undoStack()->push(new LayerBitmapUndoCommand(m_doc.get(), m_doc->activeLayerIndex(), oldImg, "Cut"));
     }
-
-    QRegion oldRegion = m_doc->selection().region();
-    m_doc->clearSelection();
-    if (!oldRegion.isEmpty()) {
-        m_doc->undoStack()->push(new SelectionUndoCommand(m_doc.get(), oldRegion, QRegion(), "Deselect"));
-    }
-    m_doc->undoStack()->endMacro();
-
-    emit m_doc->documentChanged();
+    edit.markDirty(area);
+    edit.commit(actionName);
+    return true;
 }
 
-void MainWindow::onCopy() {
+// Deselects and records it in the undo history.
+static void deselectWithUndo(Document* doc) {
+    const QRegion oldRegion = doc->selection().region();
+    if (oldRegion.isEmpty()) return;
+    doc->clearSelection();
+    doc->undoStack()->push(new SelectionUndoCommand(doc, oldRegion, QRegion(), "Deselect"));
+}
+
+void MainWindow::onCut() {
+    if (!m_doc) return;
+    onCopy();
+
+    m_doc->undoStack()->beginMacro("Cut");
+    if (m_doc->hasFloatingSelection()) {
+        // The floating pixels are not part of the layer yet: dropping them is the cut
+        m_doc->discardFloatingSelection();
+    } else {
+        paintSelectedArea(m_doc.get(), nullptr, "Cut");
+    }
+    deselectWithUndo(m_doc.get());
+    m_doc->undoStack()->endMacro();
+}
+
+void MainWindow::copyToClipboard(bool merged) {
     if (!m_doc) return;
 
-    if (m_doc->hasFloatingSelection()) {
+    QImage copied;
+    QPoint origin;
+    if (m_doc->hasFloatingSelection() && !merged) {
+        // Copy the floating pixels as they currently appear (moved, scaled, rotated)
         const QImage& baseImg = !m_doc->originalFloatingImage().isNull() ? m_doc->originalFloatingImage() : m_doc->floatingImage();
         if (baseImg.isNull()) return;
-
-        QRectF mappedRect = m_doc->floatingTransform().mapRect(QRectF(0, 0, baseImg.width(), baseImg.height()));
-        QRect aligned = mappedRect.toAlignedRect();
+        const QRect aligned = m_doc->floatingTransform().mapRect(QRectF(baseImg.rect())).toAlignedRect();
         if (aligned.isEmpty()) return;
 
-        QImage cropped(aligned.size(), QImage::Format_ARGB32);
-        cropped.fill(Qt::transparent);
-        QPainter p(&cropped);
+        copied = QImage(aligned.size(), QImage::Format_ARGB32);
+        copied.fill(Qt::transparent);
+        QPainter p(&copied);
         p.setRenderHint(QPainter::SmoothPixmapTransform, true);
         p.setRenderHint(QPainter::Antialiasing, true);
         p.translate(-aligned.topLeft());
         p.setTransform(m_doc->floatingTransform(), true);
         p.drawImage(0, 0, baseImg);
-        p.end();
+        origin = aligned.topLeft();
+    } else {
+        auto layer = m_doc->activeLayer();
+        if (!layer) return;
+        const QRect docRect(0, 0, m_doc->width(), m_doc->height());
+        const QRect srcRect = m_doc->selection().isEmpty() ? docRect
+                                                           : m_doc->selection().region().boundingRect().intersected(docRect);
+        if (srcRect.isEmpty()) return;
 
-        s_lastCopiedPos = aligned.topLeft();
-        s_lastCopiedSize = cropped.size();
-        s_hasLastCopied = true;
+        QImage source;
+        if (merged) {
+            // All visible layers, composited just for the copied rectangle
+            source = QImage(srcRect.size(), QImage::Format_ARGB32);
+            m_doc->compositeRect(srcRect, reinterpret_cast<uint32_t*>(source.bits()), source.bytesPerLine());
+        } else {
+            source = layer->image().copy(srcRect);
+        }
 
-        QClipboard* clipboard = QGuiApplication::clipboard();
-        clipboard->setImage(cropped);
-        return;
+        copied = QImage(srcRect.size(), QImage::Format_ARGB32);
+        copied.fill(Qt::transparent);
+        QPainter p(&copied);
+        p.setCompositionMode(QPainter::CompositionMode_Source);
+        if (!m_doc->selection().isEmpty()) {
+            p.setClipRegion(m_doc->selection().region().translated(-srcRect.topLeft()));
+        }
+        p.drawImage(0, 0, source);
+        origin = srcRect.topLeft();
     }
 
-    auto layer = m_doc->activeLayer();
-    if (!layer) return;
-
-    QRectF bounds = m_doc->selection().boundingRect();
-    if (bounds.isEmpty()) {
-        bounds = QRectF(0, 0, m_doc->width(), m_doc->height());
-    }
-    QRect srcRect = bounds.toAlignedRect().intersected(QRect(0, 0, m_doc->width(), m_doc->height()));
-    if (srcRect.isEmpty()) return;
-
-    QImage cropped(srcRect.size(), QImage::Format_ARGB32);
-    cropped.fill(Qt::transparent);
-
-    QPainter p(&cropped);
-    if (!m_doc->selection().isEmpty()) {
-        p.setClipPath(m_doc->selection().path().translated(-srcRect.x(), -srcRect.y()));
-    }
-    p.drawImage(-srcRect.x(), -srcRect.y(), layer->image());
-    p.end();
-
-    s_lastCopiedPos = srcRect.topLeft();
-    s_lastCopiedSize = cropped.size();
+    s_lastCopiedPos = origin;
+    s_lastCopiedSize = copied.size();
     s_hasLastCopied = true;
-
-    QClipboard* clipboard = QGuiApplication::clipboard();
-    clipboard->setImage(cropped);
+    QGuiApplication::clipboard()->setImage(copied);
 }
+
+void MainWindow::onCopy() { copyToClipboard(false); }
+void MainWindow::onCopyMerged() { copyToClipboard(true); }
 
 QImage MainWindow::getClipboardImage(QString* outFileName) const {
     const QClipboard* clipboard = QGuiApplication::clipboard();
@@ -954,150 +1066,78 @@ DropActionChoice MainWindow::askDropAction(const QStringList& filePaths) {
     }
 }
 
-bool MainWindow::pasteImage(const QImage& img, CanvasExpandChoice expandChoice, const QString& /*sourceName*/) {
-    if (img.isNull() || !m_doc) return false;
+// Makes room for an incoming image: asks (or follows expandChoice) whether to grow the canvas.
+// Returns false if the user cancelled.
+bool MainWindow::fitCanvasToImage(const QImage& img, CanvasExpandChoice expandChoice, bool isPaste) {
+    if (img.width() <= m_doc->width() && img.height() <= m_doc->height()) return true;
 
-    bool exceeds = (img.width() > m_doc->width() || img.height() > m_doc->height());
-    if (exceeds) {
-        CanvasExpandChoice choice = expandChoice;
-        if (choice == CanvasExpandChoice::Prompt) {
-            choice = askCanvasExpand(true);
-        }
-        if (choice == CanvasExpandChoice::Cancel) return false;
-        if (choice == CanvasExpandChoice::ExpandCanvas) {
-            int newW = std::max(m_doc->width(), img.width());
-            int newH = std::max(m_doc->height(), img.height());
-            m_doc->resizeCanvas(newW, newH, Qt::AlignLeft | Qt::AlignTop);
-            if (m_statusWidget) {
-                m_statusWidget->setDocumentSize(m_doc->width(), m_doc->height());
-            }
-            updateTitle();
-        }
+    CanvasExpandChoice choice = expandChoice;
+    if (choice == CanvasExpandChoice::Prompt) {
+        choice = askCanvasExpand(isPaste);
     }
-
-    QPoint pastePos(0, 0);
-    if (!exceeds && s_hasLastCopied && img.size() == s_lastCopiedSize) {
-        pastePos = s_lastCopiedPos;
+    if (choice == CanvasExpandChoice::Cancel) return false;
+    if (choice == CanvasExpandChoice::ExpandCanvas) {
+        m_doc->resizeCanvas(std::max(m_doc->width(), img.width()), std::max(m_doc->height(), img.height()),
+                            Qt::AlignLeft | Qt::AlignTop);
+        updateTitle();
     }
+    return true;
+}
 
+// Places img on the active layer as a floating selection that can be moved before it is merged.
+void MainWindow::floatImage(const QImage& img, const QPoint& pos, const QString& actionName) {
     if (m_toolMgr) {
         m_toolMgr->setActiveTool(ToolType::MoveSelectedPixels);
     }
+    const QRegion oldRegion = m_doc->selection().region();
+    m_doc->createFloatingSelection(img, pos, false, actionName);
+    m_doc->selection().addRect(QRectF(pos, img.size()), SelectionCombineMode::Replace);
+    m_doc->undoStack()->push(new PasteFloatingUndoCommand(m_doc.get(), img, pos, m_doc->activeLayerIndex(), oldRegion, actionName));
+    emit m_doc->selectionChanged();
+}
+
+// Where a pasted image goes: back where it was copied from if it still fits, else the top-left corner.
+QPoint MainWindow::pastePosition(const QImage& img, bool exceedsCanvas) const {
+    if (!exceedsCanvas && s_hasLastCopied && img.size() == s_lastCopiedSize) {
+        return s_lastCopiedPos;
+    }
+    return QPoint(0, 0);
+}
+
+bool MainWindow::pasteImage(const QImage& img, CanvasExpandChoice expandChoice, const QString& /*sourceName*/) {
+    if (img.isNull() || !m_doc) return false;
+    const bool exceeds = img.width() > m_doc->width() || img.height() > m_doc->height();
+    if (!fitCanvasToImage(img, expandChoice, true)) return false;
 
     if (m_doc->hasFloatingSelection()) {
         m_doc->bakeFloatingSelection(true, "Deselect");
     }
-
-    QRegion oldRegion = m_doc->selection().region();
-
-    m_doc->createFloatingSelection(img, pastePos, false, "Paste");
-
-    m_doc->selection().clear();
-    m_doc->selection().addRect(QRectF(pastePos, img.size()), SelectionCombineMode::Replace);
-
-    m_doc->undoStack()->push(new PasteFloatingUndoCommand(m_doc.get(), img, pastePos, m_doc->activeLayerIndex(), oldRegion, "Paste"));
-
-    emit m_doc->selectionChanged();
-    emit m_doc->documentChanged();
+    floatImage(img, pastePosition(img, exceeds), "Paste");
     return true;
 }
 
 bool MainWindow::pasteImageIntoNewLayer(const QImage& img, CanvasExpandChoice expandChoice, const QString& sourceName) {
     if (img.isNull() || !m_doc) return false;
-
-    bool exceeds = (img.width() > m_doc->width() || img.height() > m_doc->height());
-    if (exceeds) {
-        CanvasExpandChoice choice = expandChoice;
-        if (choice == CanvasExpandChoice::Prompt) {
-            choice = askCanvasExpand(true);
-        }
-        if (choice == CanvasExpandChoice::Cancel) return false;
-        if (choice == CanvasExpandChoice::ExpandCanvas) {
-            int newW = std::max(m_doc->width(), img.width());
-            int newH = std::max(m_doc->height(), img.height());
-            m_doc->resizeCanvas(newW, newH, Qt::AlignLeft | Qt::AlignTop);
-            if (m_statusWidget) {
-                m_statusWidget->setDocumentSize(m_doc->width(), m_doc->height());
-            }
-            updateTitle();
-        }
-    }
-
-    QPoint pastePos(0, 0);
-    if (!exceeds && s_hasLastCopied && img.size() == s_lastCopiedSize) {
-        pastePos = s_lastCopiedPos;
-    }
+    const bool exceeds = img.width() > m_doc->width() || img.height() > m_doc->height();
+    if (!fitCanvasToImage(img, expandChoice, true)) return false;
 
     if (m_doc->hasFloatingSelection()) {
         m_doc->bakeFloatingSelection(true, "Deselect");
     }
-
-    QString layerName = sourceName.isEmpty() ? "Pasted Layer" : sourceName;
-    auto newLayer = m_doc->addLayer(layerName);
-    if (!newLayer) return false;
-
-    if (m_toolMgr) {
-        m_toolMgr->setActiveTool(ToolType::MoveSelectedPixels);
-    }
-
-    QRegion oldRegion = m_doc->selection().region();
-
-    m_doc->createFloatingSelection(img, pastePos, false, "Paste into New Layer");
-
-    m_doc->selection().clear();
-    m_doc->selection().addRect(QRectF(pastePos, img.size()), SelectionCombineMode::Replace);
-
-    m_doc->undoStack()->push(new PasteFloatingUndoCommand(m_doc.get(), img, pastePos, m_doc->activeLayerIndex(), oldRegion, "Paste into New Layer"));
-
-    emit m_doc->selectionChanged();
-    emit m_doc->documentChanged();
+    if (!m_doc->addLayer(sourceName.isEmpty() ? "Pasted Layer" : sourceName)) return false;
+    floatImage(img, pastePosition(img, exceeds), "Paste into New Layer");
     return true;
 }
 
 bool MainWindow::addImageAsLayer(const QImage& img, const QString& layerName, CanvasExpandChoice expandChoice) {
     if (img.isNull() || !m_doc) return false;
-
-    bool exceeds = (img.width() > m_doc->width() || img.height() > m_doc->height());
-    if (exceeds) {
-        CanvasExpandChoice choice = expandChoice;
-        if (choice == CanvasExpandChoice::Prompt) {
-            choice = askCanvasExpand(false);
-        }
-        if (choice == CanvasExpandChoice::Cancel) return false;
-        if (choice == CanvasExpandChoice::ExpandCanvas) {
-            int newW = std::max(m_doc->width(), img.width());
-            int newH = std::max(m_doc->height(), img.height());
-            m_doc->resizeCanvas(newW, newH, Qt::AlignLeft | Qt::AlignTop);
-            if (m_statusWidget) {
-                m_statusWidget->setDocumentSize(m_doc->width(), m_doc->height());
-            }
-            updateTitle();
-        }
-    }
+    if (!fitCanvasToImage(img, expandChoice, false)) return false;
 
     if (m_doc->hasFloatingSelection()) {
         m_doc->bakeFloatingSelection(true, "Deselect");
     }
-
-    QString lName = layerName.isEmpty() ? "Layer" : layerName;
-    auto newLayer = m_doc->addLayer(lName);
-    if (!newLayer) return false;
-
-    if (m_toolMgr) {
-        m_toolMgr->setActiveTool(ToolType::MoveSelectedPixels);
-    }
-
-    QRegion oldRegion = m_doc->selection().region();
-
-    m_doc->createFloatingSelection(img, QPoint(0, 0), false, "Add Layer From File");
-
-    m_doc->selection().clear();
-    m_doc->selection().addRect(QRectF(0, 0, img.width(), img.height()), SelectionCombineMode::Replace);
-
-    m_doc->undoStack()->push(new PasteFloatingUndoCommand(m_doc.get(), img, QPoint(0, 0), m_doc->activeLayerIndex(), oldRegion, "Add Layer From File"));
-
-    emit m_doc->selectionChanged();
-    emit m_doc->documentChanged();
+    if (!m_doc->addLayer(layerName.isEmpty() ? "Layer" : layerName)) return false;
+    floatImage(img, QPoint(0, 0), "Add Layer From File");
     return true;
 }
 
@@ -1119,94 +1159,78 @@ void MainWindow::onPasteIntoNewLayer() {
     pasteImageIntoNewLayer(img, CanvasExpandChoice::Prompt, sourceName);
 }
 
+void MainWindow::onPasteIntoNewImage() {
+    QString sourceName;
+    const QImage img = getClipboardImage(&sourceName);
+    if (img.isNull()) return;
+    auto doc = std::make_shared<Document>(img);
+    doc->setTitle(sourceName.isEmpty() ? generateUntitledTitle() : sourceName);
+    addDocument(doc, true);
+}
+
 void MainWindow::onEraseSelection() {
     if (!m_doc) return;
-
     if (m_doc->hasFloatingSelection()) {
         m_doc->discardFloatingSelection();
         m_doc->clearSelection();
         return;
     }
-
-    auto layer = m_doc->activeLayer();
-    if (!layer) return;
-
-    QImage oldImg = layer->image().copy();
-    QPainter p(&layer->image());
-    p.setCompositionMode(QPainter::CompositionMode_Clear);
-    if (!m_doc->selection().isEmpty()) {
-        p.fillPath(m_doc->selection().path(), Qt::transparent);
-    } else {
-        layer->clear();
-    }
-    p.end();
-
-    m_doc->undoStack()->push(new LayerBitmapUndoCommand(m_doc.get(), m_doc->activeLayerIndex(), oldImg, "Erase Selection"));
-    emit m_doc->documentChanged();
+    paintSelectedArea(m_doc.get(), nullptr, "Erase Selection");
 }
 
 void MainWindow::onFillSelection() {
     if (!m_doc) return;
-    auto layer = m_doc->activeLayer();
-    if (!layer) return;
-
-    QImage oldImg = layer->image().copy();
-    QPainter p(&layer->image());
-    if (!m_doc->selection().isEmpty()) {
-        p.fillPath(m_doc->selection().path(), m_toolMgr->context().primaryColor);
-    } else {
-        p.fillRect(QRect(0, 0, m_doc->width(), m_doc->height()), m_toolMgr->context().primaryColor);
+    if (m_doc->hasFloatingSelection()) {
+        m_doc->bakeFloatingSelection(true, "Finish Move Pixels");
     }
-    p.end();
-
-    m_doc->undoStack()->push(new LayerBitmapUndoCommand(m_doc.get(), m_doc->activeLayerIndex(), oldImg, "Fill Selection"));
-    emit m_doc->documentChanged();
+    const QColor color = m_toolMgr->context().primaryColor;
+    paintSelectedArea(m_doc.get(), &color, "Fill Selection");
 }
 
 void MainWindow::onInvertSelection() {
-    if (m_doc) {
-        QRegion oldRegion = m_doc->selection().region();
-        m_doc->selection().invert(m_doc->width(), m_doc->height());
-        QRegion newRegion = m_doc->selection().region();
-        if (oldRegion != newRegion) {
-            m_doc->undoStack()->push(new SelectionUndoCommand(m_doc.get(), oldRegion, newRegion, "Invert Selection"));
-        }
-        emit m_doc->selectionChanged();
+    if (!m_doc) return;
+    if (m_doc->hasFloatingSelection()) {
+        m_doc->bakeFloatingSelection(true, "Finish Move Pixels");
     }
+    const QRegion oldRegion = m_doc->selection().region();
+    m_doc->selection().invert(m_doc->width(), m_doc->height());
+    if (oldRegion != m_doc->selection().region()) {
+        m_doc->undoStack()->push(new SelectionUndoCommand(m_doc.get(), oldRegion, m_doc->selection().region(), "Invert Selection"));
+    }
+    emit m_doc->selectionChanged();
 }
 
 void MainWindow::onSelectAll() {
-    if (m_doc) {
-        if (m_doc->hasFloatingSelection()) {
-            m_doc->bakeFloatingSelection();
-        }
-        QRegion oldRegion = m_doc->selection().region();
-        m_doc->selection().selectAll(m_doc->width(), m_doc->height());
-        QRegion newRegion = m_doc->selection().region();
-        if (oldRegion != newRegion) {
-            m_doc->undoStack()->push(new SelectionUndoCommand(m_doc.get(), oldRegion, newRegion, "Select All"));
-        }
-        emit m_doc->selectionChanged();
-        emit m_doc->documentChanged();
+    if (!m_doc) return;
+    if (m_doc->hasFloatingSelection()) {
+        m_doc->bakeFloatingSelection();
     }
+    const QRegion oldRegion = m_doc->selection().region();
+    m_doc->selection().selectAll(m_doc->width(), m_doc->height());
+    if (oldRegion != m_doc->selection().region()) {
+        m_doc->undoStack()->push(new SelectionUndoCommand(m_doc.get(), oldRegion, m_doc->selection().region(), "Select All"));
+    }
+    emit m_doc->selectionChanged();
 }
 
 void MainWindow::onDeselect() {
     if (!m_doc) return;
     if (m_doc->hasFloatingSelection()) {
         m_doc->clearSelection();
-    } else if (!m_doc->selection().isEmpty()) {
-        QRegion oldRegion = m_doc->selection().region();
-        m_doc->clearSelection();
-        m_doc->undoStack()->push(new SelectionUndoCommand(m_doc.get(), oldRegion, QRegion(), "Deselect"));
+    } else {
+        deselectWithUndo(m_doc.get());
     }
 }
 
 void MainWindow::onCropToSelection() {
     if (!m_doc || m_doc->selection().isEmpty()) return;
-    QRect cropRect = m_doc->selection().boundingRect().toAlignedRect();
-    m_doc->crop(cropRect);
-    m_statusWidget->setDocumentSize(m_doc->width(), m_doc->height());
+    m_doc->cropToSelection();
+}
+
+void MainWindow::onZoomToSelection() {
+    if (m_doc && !m_doc->selection().isEmpty()) {
+        m_canvasView->zoomToRect(m_doc->selection().boundingRect());
+    }
 }
 
 void MainWindow::onResizeImage() {
@@ -1214,7 +1238,6 @@ void MainWindow::onResizeImage() {
     ResizeImageDialog dlg(m_doc->width(), m_doc->height(), this);
     if (dlg.exec() == QDialog::Accepted) {
         m_doc->resizeImage(dlg.newWidth(), dlg.newHeight(), dlg.algorithm());
-        m_statusWidget->setDocumentSize(m_doc->width(), m_doc->height());
     }
 }
 
@@ -1223,14 +1246,13 @@ void MainWindow::onResizeCanvas() {
     CanvasSizeDialog dlg(m_doc->width(), m_doc->height(), this);
     if (dlg.exec() == QDialog::Accepted) {
         m_doc->resizeCanvas(dlg.newWidth(), dlg.newHeight(), dlg.anchor());
-        m_statusWidget->setDocumentSize(m_doc->width(), m_doc->height());
     }
 }
 
 void MainWindow::onFlipHorizontal() { if (m_doc) m_doc->flipHorizontal(); }
 void MainWindow::onFlipVertical() { if (m_doc) m_doc->flipVertical(); }
-void MainWindow::onRotate90CW() { if (m_doc) { m_doc->rotate90CW(); m_statusWidget->setDocumentSize(m_doc->width(), m_doc->height()); } }
-void MainWindow::onRotate90CCW() { if (m_doc) { m_doc->rotate90CCW(); m_statusWidget->setDocumentSize(m_doc->width(), m_doc->height()); } }
+void MainWindow::onRotate90CW() { if (m_doc) m_doc->rotate90CW(); }
+void MainWindow::onRotate90CCW() { if (m_doc) m_doc->rotate90CCW(); }
 void MainWindow::onRotate180() { if (m_doc) m_doc->rotate180(); }
 void MainWindow::onFlatten() { if (m_doc) m_doc->flatten(); }
 
@@ -1238,6 +1260,28 @@ void MainWindow::onAddLayer() { if (m_doc) m_doc->addLayer(); }
 void MainWindow::onDeleteLayer() { if (m_doc) m_doc->removeLayer(m_doc->activeLayerIndex()); }
 void MainWindow::onDuplicateLayer() { if (m_doc) m_doc->duplicateLayer(m_doc->activeLayerIndex()); }
 void MainWindow::onMergeDown() { if (m_doc) m_doc->mergeLayerDown(m_doc->activeLayerIndex()); }
+void MainWindow::onMoveLayer(int toIndex) {
+    if (!m_doc) return;
+    m_doc->moveLayer(m_doc->activeLayerIndex(), std::clamp(toIndex, 0, m_doc->layerCount() - 1));
+}
+
+void MainWindow::onFlipLayer(Qt::Orientation orientation) {
+    if (m_doc) m_doc->flipLayer(m_doc->activeLayerIndex(), orientation);
+}
+
+void MainWindow::onImportLayerFromFile() {
+    if (!m_doc) return;
+    const QStringList files = QFileDialog::getOpenFileNames(this, "Import Layers From File", QString(), ImageIO::openFileFilter());
+    for (const QString& file : files) {
+        const QImage img = ImageIO::loadImage(file);
+        if (img.isNull()) {
+            QMessageBox::critical(this, "Error Opening Image", QString("Could not load image from %1").arg(file));
+            continue;
+        }
+        if (!addImageAsLayer(img, QFileInfo(file).completeBaseName(), CanvasExpandChoice::Prompt)) break;
+    }
+}
+
 void MainWindow::onLayerProperties() {
     if (m_doc) {
         LayerPropertiesDialog dlg(m_doc.get(), m_doc->activeLayerIndex(), this);
@@ -1283,13 +1327,13 @@ void MainWindow::runEffect(const std::shared_ptr<IEffect>& effect) {
 
 void MainWindow::onRepeatLastEffect() {
     if (!m_doc || !m_doc->activeLayer() || !m_lastEffect) return;
-    int layerIdx = m_doc->activeLayerIndex();
-    QImage original = m_doc->activeLayer()->image().copy();
-    QImage copy = original.copy();
-    m_lastEffect->apply(copy, m_doc->selection());
-    m_doc->activeLayer()->setImage(copy);
+    const int layerIdx = m_doc->activeLayerIndex();
+    const QImage original = m_doc->activeLayer()->image();
+    QImage result = original.copy();
+    m_lastEffect->apply(result, m_doc->selection());
+    m_doc->activeLayer()->setImage(result);
     m_doc->undoStack()->push(new LayerBitmapUndoCommand(m_doc.get(), layerIdx, original, m_lastEffect->name()));
-    emit m_doc->documentChanged();
+    m_doc->notifyPixelsChanged(result.rect());
 }
 
 void MainWindow::onAutoLevel() { runEffect(std::make_shared<AutoLevelEffect>()); }
@@ -1337,8 +1381,8 @@ void MainWindow::onAbout() {
         "<ul>"
         "<li><b>Modern C++17 Core:</b> Native performance and compact memory footprint without managed runtime overhead.</li>"
         "<li><b>Qt 6 UI:</b> Responsive, modular interface with dockable palettes and multi-document workflows.</li>"
-        "<li><b>Dual Rendering Pipeline:</b> Hardware-accelerated Vulkan GPU backend alongside an optimized CPU fallback.</li>"
-        "<li><b>Clean-Room Compatibility:</b> Direct read/write support for Paint.NET (<code>.pdn</code>) documents, plus PNG, JPEG, WebP, BMP, and GIF.</li>"
+        "<li><b>Cached Rendering:</b> Multi-threaded compositing that only redraws what changed, even on very large images.</li>"
+        "<li><b>File Formats:</b> Direct read/write support for Paint.NET (<code>.pdn</code>) documents, plus PNG, JPEG, WebP, BMP, and GIF.</li>"
         "</ul>"
         "<p>"
         "Project: <a href=\"https://github.com/finn-freitag/Thulium\">https://github.com/finn-freitag/Thulium</a><br>"
@@ -1348,9 +1392,8 @@ void MainWindow::onAbout() {
         "<p><small>"
         "Copyright &copy; 2026 Finn Freitag. Released under the MIT License.<br><br>"
         "<b>Trademarks & Acknowledgments:</b><br>"
-        "Paint.NET is a registered trademark of Rick Brewster and dotPDN LLC. Thulium is an independent, clean-room project and is not affiliated with, endorsed by, or sponsored by dotPDN LLC.<br>"
-        "Qt is a registered trademark of The Qt Company Ltd. and its subsidiaries.<br>"
-        "Vulkan and the Vulkan logo are registered trademarks of the Khronos Group Inc."
+        "Paint.NET is a trademark of dotPDN LLC. Thulium is an independent project: it contains no Paint.NET code or assets and is not affiliated with, endorsed by, or sponsored by dotPDN LLC or Rick Brewster.<br>"
+        "Qt is a registered trademark of The Qt Company Ltd. and its subsidiaries."
         "</small></p>"
     );
 
@@ -1456,6 +1499,24 @@ void MainWindow::dropEvent(QDropEvent* event) {
     event->acceptProposedAction();
 }
 
+// True if obj is (inside) a widget the user types text into, where single-key tool shortcuts
+// must not fire.
+static bool isTextInput(QObject* obj) {
+    for (QObject* cur = obj; cur != nullptr; cur = cur->parent()) {
+        if (qobject_cast<QLineEdit*>(cur) || qobject_cast<QTextEdit*>(cur) ||
+            qobject_cast<QPlainTextEdit*>(cur) || qobject_cast<QAbstractSpinBox*>(cur)) {
+            return true;
+        }
+        if (auto cb = qobject_cast<QComboBox*>(cur)) {
+            if (cb->isEditable()) return true;
+        }
+        if (auto w = qobject_cast<QWidget*>(cur); w && w->isWindow()) {
+            break;
+        }
+    }
+    return false;
+}
+
 bool MainWindow::isComponentOfMainWindow(QObject* obj) const {
     if (!obj) return false;
     QWidget* w = qobject_cast<QWidget*>(obj);
@@ -1506,24 +1567,6 @@ bool MainWindow::eventFilter(QObject* watched, QEvent* event) {
 
         // 1. If focus is inside a text input widget or line edit, allow standard typing
         QWidget* fw = QApplication::focusWidget();
-        auto isTextInput = [](QObject* obj) -> bool {
-            if (!obj) return false;
-            for (QObject* cur = obj; cur != nullptr; cur = cur->parent()) {
-                if (qobject_cast<QLineEdit*>(cur) ||
-                    qobject_cast<QTextEdit*>(cur) ||
-                    qobject_cast<QPlainTextEdit*>(cur) ||
-                    qobject_cast<QAbstractSpinBox*>(cur)) {
-                    return true;
-                }
-                if (auto cb = qobject_cast<QComboBox*>(cur)) {
-                    if (cb->isEditable()) return true;
-                }
-                if (qobject_cast<QWidget*>(cur) && static_cast<QWidget*>(cur)->isWindow()) {
-                    break;
-                }
-            }
-            return false;
-        };
 
         if (isTextInput(fw) || isTextInput(watchedWidget)) {
             return QMainWindow::eventFilter(watched, event);
@@ -1581,24 +1624,6 @@ bool MainWindow::eventFilter(QObject* watched, QEvent* event) {
 
 void MainWindow::keyPressEvent(QKeyEvent* event) {
     QWidget* fw = focusWidget();
-    auto isTextInput = [](QObject* obj) -> bool {
-        if (!obj) return false;
-        for (QObject* cur = obj; cur != nullptr; cur = cur->parent()) {
-            if (qobject_cast<QLineEdit*>(cur) ||
-                qobject_cast<QTextEdit*>(cur) ||
-                qobject_cast<QPlainTextEdit*>(cur) ||
-                qobject_cast<QAbstractSpinBox*>(cur)) {
-                return true;
-            }
-            if (auto cb = qobject_cast<QComboBox*>(cur)) {
-                if (cb->isEditable()) return true;
-            }
-            if (qobject_cast<QWidget*>(cur) && static_cast<QWidget*>(cur)->isWindow()) {
-                break;
-            }
-        }
-        return false;
-    };
 
     if (isTextInput(fw)) {
         QMainWindow::keyPressEvent(event);

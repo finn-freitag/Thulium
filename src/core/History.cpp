@@ -1,21 +1,92 @@
 #include "History.h"
+#include <QPainter>
+#include <cstring>
 
 namespace pdn {
 
+namespace {
+
+// Smallest rectangle (within area) containing every pixel that differs between a and b.
+QRect diffRect(const QImage& a, const QImage& b, const QRect& area) {
+    if (a.constBits() == b.constBits()) return QRect(); // still sharing the same buffer
+    const size_t rowBytes = static_cast<size_t>(area.width()) * 4;
+    auto rowDiffers = [&](int y) {
+        return std::memcmp(a.constScanLine(y) + area.left() * 4, b.constScanLine(y) + area.left() * 4, rowBytes) != 0;
+    };
+
+    int top = area.top();
+    while (top <= area.bottom() && !rowDiffers(top)) ++top;
+    if (top > area.bottom()) return QRect();
+    int bottom = area.bottom();
+    while (bottom > top && !rowDiffers(bottom)) --bottom;
+
+    int left = area.right();
+    int right = area.left();
+    for (int y = top; y <= bottom; ++y) {
+        const auto* pa = reinterpret_cast<const uint32_t*>(a.constScanLine(y));
+        const auto* pb = reinterpret_cast<const uint32_t*>(b.constScanLine(y));
+        int x = area.left();
+        while (x < left && pa[x] == pb[x]) ++x;
+        left = std::min(left, x);
+        x = area.right();
+        while (x > right && pa[x] == pb[x]) --x;
+        right = std::max(right, x);
+    }
+    return QRect(QPoint(left, top), QPoint(right, bottom));
+}
+
+} // namespace
+
+// --- ImagePatch ---
+
+ImagePatch::ImagePatch(const QImage& before, const QImage& after, const QRect& hint) {
+    if (before.size() != after.size() || before.format() != after.format() ||
+        before.format() != QImage::Format_ARGB32) {
+        m_fullBefore = before;
+        m_fullAfter = after;
+        return;
+    }
+    const QRect area = hint.isValid() ? hint.intersected(before.rect()) : before.rect();
+    if (area.isEmpty()) return;
+    m_rect = diffRect(before, after, area);
+    if (!m_rect.isEmpty()) {
+        m_before = before.copy(m_rect);
+        m_after = after.copy(m_rect);
+    }
+}
+
+void ImagePatch::apply(Document* doc, int layerIndex, const QImage& patch, const QImage& full) const {
+    auto layer = doc->layer(layerIndex);
+    if (!layer) return;
+    if (!full.isNull()) {
+        layer->setImage(full);
+        emit doc->documentChanged();
+        return;
+    }
+    if (m_rect.isEmpty() || !layer->image().rect().contains(m_rect)) return;
+    const size_t rowBytes = static_cast<size_t>(m_rect.width()) * 4;
+    for (int y = 0; y < m_rect.height(); ++y) {
+        std::memcpy(layer->scanLine(m_rect.top() + y) + m_rect.left(), patch.constScanLine(y), rowBytes);
+    }
+    doc->notifyPixelsChanged(m_rect);
+}
+
+// --- LayerBitmapUndoCommand ---
+
 LayerBitmapUndoCommand::LayerBitmapUndoCommand(Document* doc, int layerIndex, const QImage& oldImage, const QString& text)
-    : QUndoCommand(text), m_doc(doc), m_layerIndex(layerIndex), m_oldImage(oldImage) {
-    auto l = doc->layer(layerIndex);
-    if (l) {
-        m_newImage = l->image().copy();
+    : LayerBitmapUndoCommand(doc, layerIndex, oldImage, QRect(), text) {
+}
+
+LayerBitmapUndoCommand::LayerBitmapUndoCommand(Document* doc, int layerIndex, const QImage& oldImage,
+                                               const QRect& changedRect, const QString& text)
+    : QUndoCommand(text), m_doc(doc), m_layerIndex(layerIndex) {
+    if (auto l = doc->layer(layerIndex)) {
+        m_patch = ImagePatch(oldImage, l->image(), changedRect);
     }
 }
 
 void LayerBitmapUndoCommand::undo() {
-    auto l = m_doc->layer(m_layerIndex);
-    if (l) {
-        l->setImage(m_oldImage.copy());
-        emit m_doc->documentChanged();
-    }
+    m_patch.applyBefore(m_doc, m_layerIndex);
 }
 
 void LayerBitmapUndoCommand::redo() {
@@ -23,11 +94,7 @@ void LayerBitmapUndoCommand::redo() {
         m_firstRedo = false;
         return;
     }
-    auto l = m_doc->layer(m_layerIndex);
-    if (l) {
-        l->setImage(m_newImage.copy());
-        emit m_doc->documentChanged();
-    }
+    m_patch.applyAfter(m_doc, m_layerIndex);
 }
 
 LayerAddUndoCommand::LayerAddUndoCommand(Document* doc, std::shared_ptr<Layer> layer, int index, const QString& text)
@@ -80,7 +147,7 @@ LayerMergeDownUndoCommand::LayerMergeDownUndoCommand(Document* doc, int bottomIn
 void LayerMergeDownUndoCommand::undo() {
     auto bottom = m_doc->layer(m_bottomIndex);
     if (bottom) {
-        bottom->setImage(m_oldBottomImage.copy());
+        bottom->setImage(m_oldBottomImage);
     }
     m_doc->insertLayer(m_bottomIndex + 1, m_removedTopLayer, false);
     emit m_doc->documentChanged();
@@ -123,51 +190,44 @@ LayerPropertyUndoCommand::LayerPropertyUndoCommand(Document* doc, int index,
       m_oldVisible(oldVisible), m_newVisible(newVisible) {
 }
 
-void LayerPropertyUndoCommand::undo() {
+void LayerPropertyUndoCommand::apply(const QString& name, uint8_t opacity, BlendMode mode, bool visible) {
     auto l = m_doc->layer(m_index);
-    if (l) {
-        l->setName(m_oldName);
-        l->setOpacity(m_oldOpacity);
-        l->setBlendMode(m_oldMode);
-        l->setVisible(m_oldVisible);
-        emit m_doc->layerPropertiesChanged(m_index);
-        emit m_doc->documentChanged();
-    }
+    if (!l) return;
+    l->setName(name);
+    l->setOpacity(opacity);
+    l->setBlendMode(mode);
+    l->setVisible(visible);
+    emit m_doc->layerPropertiesChanged(m_index);
+    emit m_doc->documentChanged();
 }
 
-void LayerPropertyUndoCommand::redo() {
-    auto l = m_doc->layer(m_index);
-    if (l) {
-        l->setName(m_newName);
-        l->setOpacity(m_newOpacity);
-        l->setBlendMode(m_newMode);
-        l->setVisible(m_newVisible);
-        emit m_doc->layerPropertiesChanged(m_index);
-        emit m_doc->documentChanged();
-    }
+void LayerPropertyUndoCommand::undo() { apply(m_oldName, m_oldOpacity, m_oldMode, m_oldVisible); }
+void LayerPropertyUndoCommand::redo() { apply(m_newName, m_newOpacity, m_newMode, m_newVisible); }
+
+LayerFlipUndoCommand::LayerFlipUndoCommand(Document* doc, int index, Qt::Orientation orientation)
+    : QUndoCommand(orientation == Qt::Horizontal ? "Flip Layer Horizontal" : "Flip Layer Vertical"),
+      m_doc(doc), m_index(index), m_orientation(orientation) {
 }
 
-ImageGeometryUndoCommand::ImageGeometryUndoCommand(Document* doc,
-                                                   int oldWidth, int oldHeight,
-                                                   const QList<QImage>& oldImages,
-                                                   const QPainterPath& oldSelectionPath,
-                                                   int newWidth, int newHeight,
-                                                   const QList<QImage>& newImages,
-                                                   const QPainterPath& newSelectionPath,
-                                                   const QString& text)
-    : QUndoCommand(text), m_doc(doc),
-      m_oldWidth(oldWidth), m_oldHeight(oldHeight), m_oldImages(oldImages), m_oldSelectionPath(oldSelectionPath),
-      m_newWidth(newWidth), m_newHeight(newHeight), m_newImages(newImages), m_newSelectionPath(newSelectionPath) {
+void LayerFlipUndoCommand::undo() {
+    m_doc->flipLayer(m_index, m_orientation, false);
+}
+
+void LayerFlipUndoCommand::redo() {
+    if (m_firstRedo) {
+        m_firstRedo = false;
+        return;
+    }
+    m_doc->flipLayer(m_index, m_orientation, false);
+}
+
+ImageGeometryUndoCommand::ImageGeometryUndoCommand(Document* doc, const GeometrySnapshot& before,
+                                                   const GeometrySnapshot& after, const QString& text)
+    : QUndoCommand(text), m_doc(doc), m_before(before), m_after(after) {
 }
 
 void ImageGeometryUndoCommand::undo() {
-    m_doc->setDocumentDimensions(m_oldWidth, m_oldHeight);
-    for (int i = 0; i < m_doc->layerCount() && i < m_oldImages.size(); ++i) {
-        m_doc->layer(i)->setImage(m_oldImages[i].copy());
-    }
-    m_doc->selection().setPath(m_oldSelectionPath);
-    emit m_doc->selectionChanged();
-    emit m_doc->documentChanged();
+    m_doc->restoreGeometry(m_before);
 }
 
 void ImageGeometryUndoCommand::redo() {
@@ -175,13 +235,23 @@ void ImageGeometryUndoCommand::redo() {
         m_firstRedo = false;
         return;
     }
-    m_doc->setDocumentDimensions(m_newWidth, m_newHeight);
-    for (int i = 0; i < m_doc->layerCount() && i < m_newImages.size(); ++i) {
-        m_doc->layer(i)->setImage(m_newImages[i].copy());
+    m_doc->restoreGeometry(m_after);
+}
+
+ImageTransformUndoCommand::ImageTransformUndoCommand(Document* doc, ImageTransform op)
+    : QUndoCommand(imageTransformName(op)), m_doc(doc), m_op(op) {
+}
+
+void ImageTransformUndoCommand::undo() {
+    m_doc->applyImageTransform(inverseTransform(m_op));
+}
+
+void ImageTransformUndoCommand::redo() {
+    if (m_firstRedo) {
+        m_firstRedo = false;
+        return;
     }
-    m_doc->selection().setPath(m_newSelectionPath);
-    emit m_doc->selectionChanged();
-    emit m_doc->documentChanged();
+    m_doc->applyImageTransform(m_op);
 }
 
 FlattenUndoCommand::FlattenUndoCommand(Document* doc,
@@ -224,23 +294,22 @@ void MetadataUndoCommand::redo() {
 }
 
 SelectionUndoCommand::SelectionUndoCommand(Document* doc, const QRegion& oldRegion, const QRegion& newRegion, const QString& text)
-    : QUndoCommand(text), m_doc(doc), m_oldRegion(oldRegion), m_newRegion(newRegion), m_firstRedo(true) {
+    : QUndoCommand(text), m_doc(doc), m_oldRegion(oldRegion), m_newRegion(newRegion) {
 }
 
-void SelectionUndoCommand::undo() {
-    m_doc->selection().setRegion(m_oldRegion);
+void SelectionUndoCommand::apply(const QRegion& region) {
+    m_doc->selection().setRegion(region);
     emit m_doc->selectionChanged();
-    emit m_doc->documentChanged();
 }
+
+void SelectionUndoCommand::undo() { apply(m_oldRegion); }
 
 void SelectionUndoCommand::redo() {
     if (m_firstRedo) {
         m_firstRedo = false;
         return;
     }
-    m_doc->selection().setRegion(m_newRegion);
-    emit m_doc->selectionChanged();
-    emit m_doc->documentChanged();
+    apply(m_newRegion);
 }
 
 PasteFloatingUndoCommand::PasteFloatingUndoCommand(Document* doc,
@@ -250,14 +319,13 @@ PasteFloatingUndoCommand::PasteFloatingUndoCommand(Document* doc,
                                                    const QRegion& oldSelectionRegion,
                                                    const QString& text)
     : QUndoCommand(text), m_doc(doc), m_pastedImage(pastedImage), m_pastePos(pastePos),
-      m_layerIndex(layerIndex), m_oldSelectionRegion(oldSelectionRegion), m_firstRedo(true) {
+      m_layerIndex(layerIndex), m_oldSelectionRegion(oldSelectionRegion) {
 }
 
 void PasteFloatingUndoCommand::undo() {
     m_doc->discardFloatingSelection();
     m_doc->selection().setRegion(m_oldSelectionRegion);
     emit m_doc->selectionChanged();
-    emit m_doc->documentChanged();
 }
 
 void PasteFloatingUndoCommand::redo() {
@@ -267,37 +335,39 @@ void PasteFloatingUndoCommand::redo() {
     }
     m_doc->setActiveLayerIndex(m_layerIndex);
     m_doc->createFloatingSelection(m_pastedImage, m_pastePos, false, text());
-    m_doc->selection().clear();
     m_doc->selection().addRect(QRectF(m_pastePos, m_pastedImage.size()), SelectionCombineMode::Replace);
     emit m_doc->selectionChanged();
-    emit m_doc->documentChanged();
 }
 
 LiftFloatingUndoCommand::LiftFloatingUndoCommand(Document* doc,
                                                 int layerIndex,
                                                 const QImage& preLiftLayerImage,
-                                                const QImage& postLiftLayerImage,
                                                 const QImage& floatingImage,
-                                                const QTransform& initialTransform,
                                                 const QTransform& newTransform,
-                                                const QPainterPath& initialSelectionPath,
-                                                const QPainterPath& newSelectionPath,
+                                                const QRegion& initialSelection,
+                                                const QRegion& newSelection,
                                                 const QString& text)
     : QUndoCommand(text), m_doc(doc), m_layerIndex(layerIndex),
-      m_preLiftLayerImage(preLiftLayerImage), m_postLiftLayerImage(postLiftLayerImage),
-      m_floatingImage(floatingImage), m_initialTransform(initialTransform),
-      m_newTransform(newTransform), m_initialSelectionPath(initialSelectionPath),
-      m_newSelectionPath(newSelectionPath), m_firstRedo(true) {
+      m_newTransform(newTransform), m_initialSelection(initialSelection), m_newSelection(newSelection) {
+    const QRect liftedRect = initialSelection.boundingRect();
+    if (auto l = doc->layer(layerIndex)) {
+        m_layerPatch = ImagePatch(preLiftLayerImage, l->image(), liftedRect);
+    }
+    m_liftedState.hasFloating = true;
+    m_liftedState.image = floatingImage;
+    m_liftedState.originalImage = floatingImage;
+    m_liftedState.snapshot = preLiftLayerImage.copy(liftedRect.intersected(preLiftLayerImage.rect()));
+    m_liftedState.snapshotOrigin = liftedRect.intersected(preLiftLayerImage.rect()).topLeft();
+    m_liftedState.layerIndex = layerIndex;
+    m_liftedState.isLifted = true;
+    m_liftedState.actionName = text;
 }
 
 void LiftFloatingUndoCommand::undo() {
     m_doc->discardFloatingSelection();
-    if (auto l = m_doc->layer(m_layerIndex)) {
-        l->setImage(m_preLiftLayerImage.copy());
-    }
-    m_doc->selection().setPath(m_initialSelectionPath);
+    m_layerPatch.applyBefore(m_doc, m_layerIndex);
+    m_doc->selection().setRegion(m_initialSelection);
     emit m_doc->selectionChanged();
-    emit m_doc->documentChanged();
 }
 
 void LiftFloatingUndoCommand::redo() {
@@ -305,98 +375,61 @@ void LiftFloatingUndoCommand::redo() {
         m_firstRedo = false;
         return;
     }
-    if (auto l = m_doc->layer(m_layerIndex)) {
-        l->setImage(m_postLiftLayerImage.copy());
-    }
-    FloatingSelectionState state;
-    state.hasFloating = true;
-    state.image = m_floatingImage;
-    state.originalImage = m_floatingImage;
-    state.offset = m_newTransform.map(QPointF(0, 0));
+    m_layerPatch.applyAfter(m_doc, m_layerIndex);
+    FloatingSelectionState state = m_liftedState;
     state.transform = m_newTransform;
-    state.snapshot = m_preLiftLayerImage;
-    state.layerIndex = m_layerIndex;
-    state.isLifted = true;
-    state.actionName = text();
+    state.offset = m_newTransform.map(QPointF(0, 0));
     m_doc->setFloatingSelectionState(state);
-    m_doc->selection().setPath(m_newSelectionPath);
+    m_doc->selection().setRegion(m_newSelection);
     emit m_doc->selectionChanged();
-    emit m_doc->documentChanged();
 }
 
 TransformFloatingUndoCommand::TransformFloatingUndoCommand(Document* doc,
                                                            const QTransform& oldTransform,
                                                            const QTransform& newTransform,
-                                                           const QPainterPath& oldPath,
-                                                           const QPainterPath& newPath,
+                                                           const QRegion& oldSelection,
+                                                           const QRegion& newSelection,
                                                            const QString& text)
-    : QUndoCommand(text), m_doc(doc), m_oldTransform(oldTransform),
-      m_newTransform(newTransform), m_oldPath(oldPath), m_newPath(newPath), m_firstRedo(true) {
+    : QUndoCommand(text), m_doc(doc), m_oldTransform(oldTransform), m_newTransform(newTransform),
+      m_oldSelection(oldSelection), m_newSelection(newSelection) {
 }
 
-void TransformFloatingUndoCommand::undo() {
-    m_doc->setFloatingTransform(m_oldTransform);
-    m_doc->selection().setPath(m_oldPath);
+void TransformFloatingUndoCommand::apply(const QTransform& transform, const QRegion& selection) {
+    m_doc->setFloatingTransform(transform);
+    m_doc->selection().setRegion(selection);
     emit m_doc->selectionChanged();
-    emit m_doc->documentChanged();
 }
+
+void TransformFloatingUndoCommand::undo() { apply(m_oldTransform, m_oldSelection); }
 
 void TransformFloatingUndoCommand::redo() {
     if (m_firstRedo) {
         m_firstRedo = false;
         return;
     }
-    m_doc->setFloatingTransform(m_newTransform);
-    m_doc->selection().setPath(m_newPath);
-    emit m_doc->selectionChanged();
-    emit m_doc->documentChanged();
-}
-
-TransformSelectionUndoCommand::TransformSelectionUndoCommand(Document* doc,
-                                                             const QPainterPath& oldPath,
-                                                             const QPainterPath& newPath,
-                                                             const QString& text)
-    : QUndoCommand(text), m_doc(doc), m_oldPath(oldPath), m_newPath(newPath), m_firstRedo(true) {
-}
-
-void TransformSelectionUndoCommand::undo() {
-    m_doc->selection().setPath(m_oldPath);
-    emit m_doc->selectionChanged();
-    emit m_doc->documentChanged();
-}
-
-void TransformSelectionUndoCommand::redo() {
-    if (m_firstRedo) {
-        m_firstRedo = false;
-        return;
-    }
-    m_doc->selection().setPath(m_newPath);
-    emit m_doc->selectionChanged();
-    emit m_doc->documentChanged();
+    apply(m_newTransform, m_newSelection);
 }
 
 BakeFloatingUndoCommand::BakeFloatingUndoCommand(Document* doc,
                                                  int layerIndex,
                                                  const QImage& preBakeImage,
-                                                 const QImage& postBakeImage,
+                                                 const QRect& affectedRect,
                                                  const FloatingSelectionState& floatingState,
-                                                 const QPainterPath& preSelectionPath,
-                                                 const QPainterPath& postSelectionPath,
+                                                 const QRegion& preSelection,
+                                                 const QRegion& postSelection,
                                                  const QString& text)
-    : QUndoCommand(text), m_doc(doc), m_layerIndex(layerIndex),
-      m_preBakeImage(preBakeImage), m_postBakeImage(postBakeImage),
-      m_floatingState(floatingState), m_preSelectionPath(preSelectionPath),
-      m_postSelectionPath(postSelectionPath), m_firstRedo(true) {
+    : QUndoCommand(text), m_doc(doc), m_layerIndex(layerIndex), m_floatingState(floatingState),
+      m_preSelection(preSelection), m_postSelection(postSelection) {
+    if (auto l = doc->layer(layerIndex)) {
+        m_layerPatch = ImagePatch(preBakeImage, l->image(), affectedRect);
+    }
 }
 
 void BakeFloatingUndoCommand::undo() {
-    if (auto l = m_doc->layer(m_layerIndex)) {
-        l->setImage(m_preBakeImage.copy());
-    }
+    m_layerPatch.applyBefore(m_doc, m_layerIndex);
     m_doc->setFloatingSelectionState(m_floatingState);
-    m_doc->selection().setPath(m_preSelectionPath);
+    m_doc->selection().setRegion(m_preSelection);
     emit m_doc->selectionChanged();
-    emit m_doc->documentChanged();
 }
 
 void BakeFloatingUndoCommand::redo() {
@@ -404,13 +437,10 @@ void BakeFloatingUndoCommand::redo() {
         m_firstRedo = false;
         return;
     }
-    if (auto l = m_doc->layer(m_layerIndex)) {
-        l->setImage(m_postBakeImage.copy());
-    }
     m_doc->discardFloatingSelection();
-    m_doc->selection().setPath(m_postSelectionPath);
+    m_layerPatch.applyAfter(m_doc, m_layerIndex);
+    m_doc->selection().setRegion(m_postSelection);
     emit m_doc->selectionChanged();
-    emit m_doc->documentChanged();
 }
 
 } // namespace pdn

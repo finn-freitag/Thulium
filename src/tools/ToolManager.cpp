@@ -233,7 +233,6 @@ bool ToolManager::handleKeyPress(QKeyEvent* event) {
                 m_document->undoStack()->push(new SelectionUndoCommand(m_document, oldRegion, newRegion, "Move Selection"));
             }
             emit m_document->selectionChanged();
-            emit m_document->documentChanged();
             return true;
         }
     }

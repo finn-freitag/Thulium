@@ -1,4 +1,5 @@
 #include "Adjustments.h"
+#include "../core/Parallel.h"
 #include <algorithm>
 #include <cmath>
 #include <vector>
@@ -73,7 +74,8 @@ void AutoLevelEffect::process(QImage& image, const Selection& selection) {
         lutB[i] = static_cast<uint8_t>(std::clamp((i - minB) * 255.0 / (maxB - minB), 0.0, 255.0));
     }
 
-    for (int y = 0; y < h; ++y) {
+    image.detach(); // worker threads must not trigger a copy-on-write
+    parallelRows(h, [&](int y) {
         uint32_t* line = reinterpret_cast<uint32_t*>(image.scanLine(y));
         for (int x = 0; x < w; ++x) {
             if (!selection.isEmpty() && !selection.containsPixel(x, y)) continue;
@@ -84,7 +86,7 @@ void AutoLevelEffect::process(QImage& image, const Selection& selection) {
             uint8_t b = lutB[px & 0xFF];
             line[x] = a | (r << 16) | (g << 8) | b;
         }
-    }
+    });
 }
 
 bool AutoLevelEffect::apply(QImage& image, const Selection& selection) {
@@ -105,7 +107,8 @@ void BlackAndWhiteEffect::process(QImage& image, const Selection& selection) {
     int w = image.width();
     int h = image.height();
 
-    for (int y = 0; y < h; ++y) {
+    image.detach(); // worker threads must not trigger a copy-on-write
+    parallelRows(h, [&](int y) {
         uint32_t* line = reinterpret_cast<uint32_t*>(image.scanLine(y));
         for (int x = 0; x < w; ++x) {
             if (!selection.isEmpty() && !selection.containsPixel(x, y)) continue;
@@ -117,7 +120,7 @@ void BlackAndWhiteEffect::process(QImage& image, const Selection& selection) {
             uint32_t luma = (299 * r + 587 * g + 114 * b + 500) / 1000;
             line[x] = a | (luma << 16) | (luma << 8) | luma;
         }
-    }
+    });
 }
 
 bool BlackAndWhiteEffect::apply(QImage& image, const Selection& selection) {
@@ -138,7 +141,8 @@ void InvertColorsEffect::process(QImage& image, const Selection& selection) {
     int w = image.width();
     int h = image.height();
 
-    for (int y = 0; y < h; ++y) {
+    image.detach(); // worker threads must not trigger a copy-on-write
+    parallelRows(h, [&](int y) {
         uint32_t* line = reinterpret_cast<uint32_t*>(image.scanLine(y));
         for (int x = 0; x < w; ++x) {
             if (!selection.isEmpty() && !selection.containsPixel(x, y)) continue;
@@ -147,7 +151,7 @@ void InvertColorsEffect::process(QImage& image, const Selection& selection) {
             uint32_t rgb = (~px) & 0x00FFFFFF;
             line[x] = a | rgb;
         }
-    }
+    });
 }
 
 bool InvertColorsEffect::apply(QImage& image, const Selection& selection) {
@@ -168,7 +172,8 @@ void InvertAlphaEffect::process(QImage& image, const Selection& selection) {
     int w = image.width();
     int h = image.height();
 
-    for (int y = 0; y < h; ++y) {
+    image.detach(); // worker threads must not trigger a copy-on-write
+    parallelRows(h, [&](int y) {
         uint32_t* line = reinterpret_cast<uint32_t*>(image.scanLine(y));
         for (int x = 0; x < w; ++x) {
             if (!selection.isEmpty() && !selection.containsPixel(x, y)) continue;
@@ -176,7 +181,7 @@ void InvertAlphaEffect::process(QImage& image, const Selection& selection) {
             uint32_t invA = (255 - ((px >> 24) & 0xFF)) << 24;
             line[x] = invA | (px & 0x00FFFFFF);
         }
-    }
+    });
 }
 
 bool InvertAlphaEffect::apply(QImage& image, const Selection& selection) {
@@ -204,7 +209,8 @@ void SepiaEffect::process(QImage& image, const Selection& selection) {
     int w = image.width();
     int h = image.height();
 
-    for (int y = 0; y < h; ++y) {
+    image.detach(); // worker threads must not trigger a copy-on-write
+    parallelRows(h, [&](int y) {
         uint32_t* line = reinterpret_cast<uint32_t*>(image.scanLine(y));
         for (int x = 0; x < w; ++x) {
             if (!selection.isEmpty() && !selection.containsPixel(x, y)) continue;
@@ -216,7 +222,7 @@ void SepiaEffect::process(QImage& image, const Selection& selection) {
             uint32_t luma = (299 * r + 587 * g + 114 * b + 500) / 1000;
             line[x] = a | (lutR[luma] << 16) | (lutG[luma] << 8) | lutB[luma];
         }
-    }
+    });
 }
 
 bool SepiaEffect::apply(QImage& image, const Selection& selection) {
@@ -244,7 +250,8 @@ void PosterizeEffect::process(QImage& image, const Selection& selection, int lev
     int w = image.width();
     int h = image.height();
 
-    for (int y = 0; y < h; ++y) {
+    image.detach(); // worker threads must not trigger a copy-on-write
+    parallelRows(h, [&](int y) {
         uint32_t* line = reinterpret_cast<uint32_t*>(image.scanLine(y));
         for (int x = 0; x < w; ++x) {
             if (!selection.isEmpty() && !selection.containsPixel(x, y)) continue;
@@ -255,10 +262,11 @@ void PosterizeEffect::process(QImage& image, const Selection& selection, int lev
             uint8_t b = lut[px & 0xFF];
             line[x] = a | (r << 16) | (g << 8) | b;
         }
-    }
+    });
 }
 
 bool PosterizeEffect::apply(QImage& image, const Selection& selection) {
+    if (applyRemembered(image, selection)) return true;
     process(image, selection, 16);
     return true;
 }
@@ -266,7 +274,7 @@ bool PosterizeEffect::apply(QImage& image, const Selection& selection) {
 bool PosterizeEffect::showDialog(QWidget* parent, Document* doc) {
     if (!doc || !doc->activeLayer()) return false;
     PosterizeDialog dlg(doc, parent);
-    return dlg.exec() == QDialog::Accepted;
+    return runDialog(dlg);
 }
 
 PosterizeDialog::PosterizeDialog(Document* doc, QWidget* parent)
@@ -280,6 +288,12 @@ PosterizeDialog::PosterizeDialog(Document* doc, QWidget* parent)
 
 void PosterizeDialog::processPreview(QImage& image) {
     PosterizeEffect::process(image, m_doc->selection(), m_levels);
+}
+
+EffectApplier PosterizeDialog::applier() const {
+    return [p0 = m_levels](QImage& image, const Selection& selection) {
+        PosterizeEffect::process(image, selection, p0);
+    };
 }
 
 // ==========================================
@@ -339,7 +353,8 @@ void HueSaturationEffect::process(QImage& image, const Selection& selection, int
     double satFactor = saturation / 100.0;
     double lightFactor = lightness / 100.0;
 
-    for (int y = 0; y < h; ++y) {
+    image.detach(); // worker threads must not trigger a copy-on-write
+    parallelRows(h, [&](int y) {
         uint32_t* line = reinterpret_cast<uint32_t*>(image.scanLine(y));
         for (int x = 0; x < w; ++x) {
             if (!selection.isEmpty() && !selection.containsPixel(x, y)) continue;
@@ -367,10 +382,11 @@ void HueSaturationEffect::process(QImage& image, const Selection& selection, int
             hslToRgb(hDeg, sVal, lVal, r, g, b);
             line[x] = a | (r << 16) | (g << 8) | b;
         }
-    }
+    });
 }
 
 bool HueSaturationEffect::apply(QImage& image, const Selection& selection) {
+    if (applyRemembered(image, selection)) return true;
     process(image, selection, 0, 100, 0);
     return true;
 }
@@ -378,7 +394,7 @@ bool HueSaturationEffect::apply(QImage& image, const Selection& selection) {
 bool HueSaturationEffect::showDialog(QWidget* parent, Document* doc) {
     if (!doc || !doc->activeLayer()) return false;
     HueSaturationDialog dlg(doc, parent);
-    return dlg.exec() == QDialog::Accepted;
+    return runDialog(dlg);
 }
 
 HueSaturationDialog::HueSaturationDialog(Document* doc, QWidget* parent)
@@ -393,6 +409,12 @@ HueSaturationDialog::HueSaturationDialog(Document* doc, QWidget* parent)
 
 void HueSaturationDialog::processPreview(QImage& image) {
     HueSaturationEffect::process(image, m_doc->selection(), m_hue, m_saturation, m_lightness);
+}
+
+EffectApplier HueSaturationDialog::applier() const {
+    return [p0 = m_hue, p1 = m_saturation, p2 = m_lightness](QImage& image, const Selection& selection) {
+        HueSaturationEffect::process(image, selection, p0, p1, p2);
+    };
 }
 
 // ==========================================
@@ -423,7 +445,8 @@ void TemperatureTintEffect::process(QImage& image, const Selection& selection, i
         lutB[i] = static_cast<uint8_t>(std::clamp(i + bOff, 0, 255));
     }
 
-    for (int y = 0; y < h; ++y) {
+    image.detach(); // worker threads must not trigger a copy-on-write
+    parallelRows(h, [&](int y) {
         uint32_t* line = reinterpret_cast<uint32_t*>(image.scanLine(y));
         for (int x = 0; x < w; ++x) {
             if (!selection.isEmpty() && !selection.containsPixel(x, y)) continue;
@@ -434,10 +457,11 @@ void TemperatureTintEffect::process(QImage& image, const Selection& selection, i
             uint8_t b = lutB[px & 0xFF];
             line[x] = a | (r << 16) | (g << 8) | b;
         }
-    }
+    });
 }
 
 bool TemperatureTintEffect::apply(QImage& image, const Selection& selection) {
+    if (applyRemembered(image, selection)) return true;
     process(image, selection, 0, 0);
     return true;
 }
@@ -445,7 +469,7 @@ bool TemperatureTintEffect::apply(QImage& image, const Selection& selection) {
 bool TemperatureTintEffect::showDialog(QWidget* parent, Document* doc) {
     if (!doc || !doc->activeLayer()) return false;
     TemperatureTintDialog dlg(doc, parent);
-    return dlg.exec() == QDialog::Accepted;
+    return runDialog(dlg);
 }
 
 TemperatureTintDialog::TemperatureTintDialog(Document* doc, QWidget* parent)
@@ -459,6 +483,12 @@ TemperatureTintDialog::TemperatureTintDialog(Document* doc, QWidget* parent)
 
 void TemperatureTintDialog::processPreview(QImage& image) {
     TemperatureTintEffect::process(image, m_doc->selection(), m_temperature, m_tint);
+}
+
+EffectApplier TemperatureTintDialog::applier() const {
+    return [p0 = m_temperature, p1 = m_tint](QImage& image, const Selection& selection) {
+        TemperatureTintEffect::process(image, selection, p0, p1);
+    };
 }
 
 } // namespace pdn

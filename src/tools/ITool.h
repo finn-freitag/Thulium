@@ -42,7 +42,10 @@ enum class ShapeType {
     Diamond,
     Triangle,
     Star,
-    Polygon
+    Pentagon,
+    Hexagon,
+    Arrow,
+    Heart
 };
 
 enum class FillMode {
@@ -53,9 +56,16 @@ enum class FillMode {
 
 enum class GradientMode {
     Linear,
+    LinearReflected,
     Radial,
     Diamond,
-    Conical
+    Conical,
+    Spiral
+};
+
+enum class FloodMode {
+    Contiguous, // only pixels connected to the clicked one
+    Global      // every similar pixel on the layer
 };
 
 enum class ColorCompositionMode {
@@ -68,6 +78,8 @@ struct ToolContext {
     QColor secondaryColor = Qt::white;
     bool activeColorIsPrimary = true; // true = Primary slot selected, false = Secondary slot selected
     int brushWidth = 2;
+    int brushHardness = 100; // 0..100%: how much of the brush radius is fully opaque before it fades out
+    BlendMode brushBlendMode = BlendMode::Normal; // how painted colour combines with the layer (Draw Over only)
     int tolerance = 50; // 0..100%
     bool antiAliasing = true;
     ColorCompositionMode compositionMode = ColorCompositionMode::DrawOver;
@@ -75,6 +87,7 @@ struct ToolContext {
     ShapeType shapeType = ShapeType::Rectangle;
     FillMode fillMode = FillMode::OutlineOnly;
     GradientMode gradientMode = GradientMode::Linear;
+    FloodMode floodMode = FloodMode::Contiguous;
 
     // Text tool properties
     QFont font = QFont("Arial", 12);

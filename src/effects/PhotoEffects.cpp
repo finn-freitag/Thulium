@@ -1,4 +1,5 @@
 #include "PhotoEffects.h"
+#include "../core/Parallel.h"
 #include "GaussianBlur.h"
 #include "BrightnessContrast.h"
 #include <cmath>
@@ -21,7 +22,8 @@ void SharpenEffect::process(QImage& image, const Selection& selection, int amoun
     double centerW = 1.0 + 4.0 * weight;
     double edgeW = -weight;
 
-    for (int y = 0; y < h; ++y) {
+    image.detach(); // worker threads must not trigger a copy-on-write
+    parallelRows(h, [&](int y) {
         uint32_t* dstLine = reinterpret_cast<uint32_t*>(image.scanLine(y));
         int yUp = std::max(0, y - 1);
         int yDown = std::min(h - 1, y + 1);
@@ -55,10 +57,11 @@ void SharpenEffect::process(QImage& image, const Selection& selection, int amoun
 
             dstLine[x] = (mid & 0xFF000000) | (outR << 16) | (outG << 8) | outB;
         }
-    }
+    });
 }
 
 bool SharpenEffect::apply(QImage& image, const Selection& selection) {
+    if (applyRemembered(image, selection)) return true;
     process(image, selection, 2);
     return true;
 }
@@ -66,7 +69,7 @@ bool SharpenEffect::apply(QImage& image, const Selection& selection) {
 bool SharpenEffect::showDialog(QWidget* parent, Document* doc) {
     if (!doc || !doc->activeLayer()) return false;
     SharpenDialog dlg(doc, parent);
-    return dlg.exec() == QDialog::Accepted;
+    return runDialog(dlg);
 }
 
 SharpenDialog::SharpenDialog(Document* doc, QWidget* parent)
@@ -79,6 +82,12 @@ SharpenDialog::SharpenDialog(Document* doc, QWidget* parent)
 
 void SharpenDialog::processPreview(QImage& image) {
     SharpenEffect::process(image, m_doc->selection(), m_amount);
+}
+
+EffectApplier SharpenDialog::applier() const {
+    return [p0 = m_amount](QImage& image, const Selection& selection) {
+        SharpenEffect::process(image, selection, p0);
+    };
 }
 
 // ==========================================
@@ -96,7 +105,8 @@ void GlowEffect::process(QImage& image, const Selection& selection, int radius, 
     BrightnessContrastEffect::process(blurred, selection, brightness, contrast);
 
     // Screen blend: dst = 255 - ((255 - a) * (255 - b)) / 255
-    for (int y = 0; y < h; ++y) {
+    image.detach(); // worker threads must not trigger a copy-on-write
+    parallelRows(h, [&](int y) {
         uint32_t* baseLine = reinterpret_cast<uint32_t*>(image.scanLine(y));
         const uint32_t* glowLine = reinterpret_cast<const uint32_t*>(blurred.constScanLine(y));
 
@@ -121,10 +131,11 @@ void GlowEffect::process(QImage& image, const Selection& selection, int radius, 
 
             baseLine[x] = a | (outR << 16) | (outG << 8) | outB;
         }
-    }
+    });
 }
 
 bool GlowEffect::apply(QImage& image, const Selection& selection) {
+    if (applyRemembered(image, selection)) return true;
     process(image, selection, 6, 10, 10);
     return true;
 }
@@ -132,7 +143,7 @@ bool GlowEffect::apply(QImage& image, const Selection& selection) {
 bool GlowEffect::showDialog(QWidget* parent, Document* doc) {
     if (!doc || !doc->activeLayer()) return false;
     GlowDialog dlg(doc, parent);
-    return dlg.exec() == QDialog::Accepted;
+    return runDialog(dlg);
 }
 
 GlowDialog::GlowDialog(Document* doc, QWidget* parent)
@@ -147,6 +158,12 @@ GlowDialog::GlowDialog(Document* doc, QWidget* parent)
 
 void GlowDialog::processPreview(QImage& image) {
     GlowEffect::process(image, m_doc->selection(), m_radius, m_brightness, m_contrast);
+}
+
+EffectApplier GlowDialog::applier() const {
+    return [p0 = m_radius, p1 = m_brightness, p2 = m_contrast](QImage& image, const Selection& selection) {
+        GlowEffect::process(image, selection, p0, p1, p2);
+    };
 }
 
 // ==========================================
@@ -168,7 +185,8 @@ void VignetteEffect::process(QImage& image, const Selection& selection, int radi
     if (range < 1.0) range = 1.0;
     double maxDarkness = density / 100.0;
 
-    for (int y = 0; y < h; ++y) {
+    image.detach(); // worker threads must not trigger a copy-on-write
+    parallelRows(h, [&](int y) {
         uint32_t* line = reinterpret_cast<uint32_t*>(image.scanLine(y));
         for (int x = 0; x < w; ++x) {
             if (!selection.isEmpty() && !selection.containsPixel(x, y)) continue;
@@ -190,10 +208,11 @@ void VignetteEffect::process(QImage& image, const Selection& selection, int radi
                 line[x] = a | (r << 16) | (g << 8) | b;
             }
         }
-    }
+    });
 }
 
 bool VignetteEffect::apply(QImage& image, const Selection& selection) {
+    if (applyRemembered(image, selection)) return true;
     process(image, selection, 50, 50);
     return true;
 }
@@ -201,7 +220,7 @@ bool VignetteEffect::apply(QImage& image, const Selection& selection) {
 bool VignetteEffect::showDialog(QWidget* parent, Document* doc) {
     if (!doc || !doc->activeLayer()) return false;
     VignetteDialog dlg(doc, parent);
-    return dlg.exec() == QDialog::Accepted;
+    return runDialog(dlg);
 }
 
 VignetteDialog::VignetteDialog(Document* doc, QWidget* parent)
@@ -282,6 +301,12 @@ void VignetteDialog::onReset() {
 
 void VignetteDialog::processPreview(QImage& image) {
     VignetteEffect::process(image, m_doc->selection(), m_radius, m_density, m_center);
+}
+
+EffectApplier VignetteDialog::applier() const {
+    return [p0 = m_radius, p1 = m_density, p2 = m_center](QImage& image, const Selection& selection) {
+        VignetteEffect::process(image, selection, p0, p1, p2);
+    };
 }
 
 } // namespace pdn

@@ -49,6 +49,12 @@
             packages = with pkgs; [
               gdb
             ];
+            # Binaries built in the dev shell are not wrapped, so point Qt at the plugins that
+            # match the Qt version they were linked against (otherwise the system-wide plugin
+            # path is used and e.g. SVG icons fail to load).
+            shellHook = ''
+              export QT_PLUGIN_PATH=${pkgs.qt6.qtbase}/lib/qt-6/plugins:${pkgs.qt6.qtsvg}/lib/qt-6/plugins:${pkgs.qt6.qtimageformats}/lib/qt-6/plugins:${pkgs.qt6.qtwayland}/lib/qt-6/plugins
+            '';
           };
         }
       );

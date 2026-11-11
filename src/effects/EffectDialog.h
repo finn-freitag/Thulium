@@ -14,6 +14,8 @@
 #include "../core/Document.h"
 #include "../core/History.h"
 #include "ICanvasInteraction.h"
+#include "IEffect.h"
+#include <QTimer>
 
 namespace pdn {
 
@@ -57,11 +59,16 @@ public:
     // ICanvasOverlayProvider
     void drawCanvasOverlay(QPainter& /*painter*/, const RenderOptions& /*opts*/) override {}
 
+    // The effect with the dialog's current settings, usable after the dialog is gone.
+    virtual EffectApplier applier() const = 0;
+
 protected:
     virtual void processPreview(QImage& image) = 0;
     virtual void onReset();
 
+    // Schedules a preview refresh. Bursts of changes (dragging a slider) collapse into one.
     void updatePreview();
+    void renderPreviewNow();
 
     void reject() override;
     void accept() override;
@@ -75,6 +82,7 @@ protected:
     std::vector<SliderControls> m_sliders;
     std::vector<std::pair<QCheckBox*, bool>> m_checkBoxes;
     bool m_buttonsAdded = false;
+    QTimer m_previewTimer;
 
     ICanvasInteractionBridge* m_bridge = nullptr;
     bool m_pointPickingEnabled = false;

@@ -26,6 +26,7 @@ public:
 
 protected:
     void processPreview(QImage& image) override;
+    EffectApplier applier() const override;
 
 private:
     int m_sensitivity = 5;
@@ -52,6 +53,7 @@ public:
 
 protected:
     void processPreview(QImage& image) override;
+    EffectApplier applier() const override;
 
 private:
     int m_angle = 45;
@@ -79,6 +81,7 @@ public:
 
 protected:
     void processPreview(QImage& image) override;
+    EffectApplier applier() const override;
 
 private:
     int m_brushSize = 3;

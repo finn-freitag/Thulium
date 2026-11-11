@@ -87,8 +87,10 @@ public slots:
     // Edit
     void onCut();
     void onCopy();
+    void onCopyMerged();
     void onPaste();
     void onPasteIntoNewLayer();
+    void onPasteIntoNewImage();
     void onEraseSelection();
     void onFillSelection();
     void onInvertSelection();
@@ -97,6 +99,7 @@ public slots:
 
     // Image
     void onCropToSelection();
+    void onZoomToSelection();
     void onResizeImage();
     void onResizeCanvas();
     void onFlipHorizontal();
@@ -111,6 +114,9 @@ public slots:
     void onDeleteLayer();
     void onDuplicateLayer();
     void onMergeDown();
+    void onMoveLayer(int toIndex);
+    void onFlipLayer(Qt::Orientation orientation);
+    void onImportLayerFromFile();
     void onLayerProperties();
 
     // Adjustments
@@ -161,6 +167,13 @@ private:
     void updateTitle();
     void updateWindowMenu();
     void updateSelectionStatus();
+    void addRecentFile(const QString& filePath);
+    void removeRecentFile(const QString& filePath);
+    void rebuildRecentMenu();
+    void copyToClipboard(bool merged);
+    bool fitCanvasToImage(const QImage& img, CanvasExpandChoice expandChoice, bool isPaste);
+    void floatImage(const QImage& img, const QPoint& pos, const QString& actionName);
+    QPoint pastePosition(const QImage& img, bool exceedsCanvas) const;
     bool maybeSaveDocument(int index);
     void closeDocumentWithoutPrompt(int index);
     QString generateUntitledTitle();
@@ -183,6 +196,7 @@ private:
     ColorsDock* m_colorsDock;
     StatusWidget* m_statusWidget;
 
+    QMenu* m_recentMenu = nullptr;
     QMenu* m_windowMenu = nullptr;
     QList<QAction*> m_windowDocActions;
 

@@ -25,6 +25,7 @@ public:
 
 protected:
     void processPreview(QImage& image) override;
+    EffectApplier applier() const override;
 
 private:
     int m_radius = 2;

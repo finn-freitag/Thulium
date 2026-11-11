@@ -28,6 +28,7 @@ public:
 
 protected:
     void processPreview(QImage& image) override;
+    EffectApplier applier() const override;
 
 private:
     int m_angle = 0;
@@ -61,6 +62,7 @@ public:
 
 protected:
     void processPreview(QImage& image) override;
+    EffectApplier applier() const override;
     void onReset() override;
 
 private:

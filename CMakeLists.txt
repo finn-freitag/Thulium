@@ -8,16 +8,11 @@ set(CMAKE_AUTOMOC ON)
 set(CMAKE_AUTORCC ON)
 set(CMAKE_AUTOUIC ON)
 
-find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Svg PrintSupport)
+find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Svg PrintSupport Concurrent)
 find_package(ZLIB REQUIRED)
 find_package(GIF REQUIRED)
 
-# Vulkan setup
-set(VULKAN_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/third_party/vulkan/include")
-find_library(VULKAN_LIB NAMES vulkan)
-
 include_directories(
-    ${VULKAN_INCLUDE_DIR}
     ${ZLIB_INCLUDE_DIRS}
     ${CMAKE_CURRENT_SOURCE_DIR}/src
 )
@@ -36,6 +31,9 @@ set(PDN_SOURCES
     src/core/History.cpp
     src/core/Resampling.h
     src/core/Resampling.cpp
+    src/core/FloodFill.h
+    src/core/FloodFill.cpp
+    src/core/Parallel.h
 
     src/io/PdnFormat.h
     src/io/PdnFormat.cpp
@@ -45,12 +43,14 @@ set(PDN_SOURCES
     src/io/ImageIO.cpp
 
     src/rendering/IRenderer.h
+    src/rendering/DisplayCache.h
+    src/rendering/DisplayCache.cpp
     src/rendering/SoftwareRenderer.h
     src/rendering/SoftwareRenderer.cpp
-    src/rendering/VulkanRenderer.h
-    src/rendering/VulkanRenderer.cpp
 
     src/tools/ITool.h
+    src/tools/LayerEdit.h
+    src/tools/LayerEdit.cpp
     src/tools/BrushTools.h
     src/tools/BrushTools.cpp
     src/tools/SelectionTools.h
@@ -88,6 +88,9 @@ set(PDN_SOURCES
     src/effects/PhotoEffects.cpp
     src/effects/StylizeEffects.h
     src/effects/StylizeEffects.cpp
+    src/effects/ParametricEffect.h
+    src/effects/ParametricEffect.cpp
+    src/effects/MoreEffects.cpp
     src/effects/PluginManager.h
     src/effects/PluginManager.cpp
 
@@ -125,12 +128,11 @@ target_link_libraries(pdn_core PUBLIC
     Qt6::Widgets
     Qt6::Svg
     Qt6::PrintSupport
+    Qt6::Concurrent
     ZLIB::ZLIB
     GIF::GIF
-    ${VULKAN_LIB}
 )
 target_include_directories(pdn_core PUBLIC
-    ${VULKAN_INCLUDE_DIR}
     ${CMAKE_CURRENT_SOURCE_DIR}/src
 )
 
@@ -162,6 +164,14 @@ endforeach()
 # Tests
 include(CTest)
 if(BUILD_TESTING)
+    # The tests rely on assert(): keep assertions enabled even in Release builds, otherwise
+    # every check silently compiles to nothing and the suite always "passes".
+    if(MSVC)
+        add_compile_options(/UNDEBUG)
+    else()
+        add_compile_options(-UNDEBUG)
+    endif()
+
     add_executable(test_pdn tests/test_pdn.cpp)
     target_link_libraries(test_pdn PRIVATE pdn_core)
     add_test(NAME test_pdn COMMAND test_pdn "${CMAKE_CURRENT_SOURCE_DIR}/Card.pdn")
@@ -209,6 +219,19 @@ if(BUILD_TESTING)
     add_executable(test_print tests/test_print.cpp)
     target_link_libraries(test_print PRIVATE pdn_core)
     add_test(NAME test_print COMMAND test_print)
+
+    add_executable(test_core_rework tests/test_core_rework.cpp)
+    target_link_libraries(test_core_rework PRIVATE pdn_core)
+    add_test(NAME test_core_rework COMMAND test_core_rework)
+
+    # Manual performance benchmark (not registered with ctest)
+    add_executable(bench_render tests/bench_render.cpp)
+    target_link_libraries(bench_render PRIVATE pdn_core)
+
+    # Manual UI snapshot tool: renders the main window to PNGs after scripted interactions
+    find_package(Qt6 REQUIRED COMPONENTS Test)
+    add_executable(ui_snapshot tests/ui_snapshot.cpp)
+    target_link_libraries(ui_snapshot PRIVATE pdn_core Qt6::Test)
 endif()
 
 

@@ -26,6 +26,7 @@ public:
 
 protected:
     void processPreview(QImage& image) override;
+    EffectApplier applier() const override;
 
 private:
     int m_brightness = 0;

@@ -1,4 +1,5 @@
 #include "BrightnessContrast.h"
+#include "../core/Parallel.h"
 #include <algorithm>
 #include <cmath>
 
@@ -20,7 +21,8 @@ void BrightnessContrastEffect::process(QImage& image, const Selection& selection
     int w = image.width();
     int h = image.height();
 
-    for (int y = 0; y < h; ++y) {
+    image.detach(); // worker threads must not trigger a copy-on-write
+    parallelRows(h, [&](int y) {
         uint32_t* line = reinterpret_cast<uint32_t*>(image.scanLine(y));
         for (int x = 0; x < w; ++x) {
             if (!selection.isEmpty() && !selection.containsPixel(x, y)) {
@@ -36,10 +38,11 @@ void BrightnessContrastEffect::process(QImage& image, const Selection& selection
 
             line[x] = (a << 24) | (r << 16) | (g << 8) | b;
         }
-    }
+    });
 }
 
 bool BrightnessContrastEffect::apply(QImage& image, const Selection& selection) {
+    if (applyRemembered(image, selection)) return true;
     process(image, selection, 20, 20);
     return true;
 }
@@ -47,7 +50,7 @@ bool BrightnessContrastEffect::apply(QImage& image, const Selection& selection) 
 bool BrightnessContrastEffect::showDialog(QWidget* parent, Document* doc) {
     if (!doc || !doc->activeLayer()) return false;
     BrightnessContrastDialog dlg(doc, parent);
-    return dlg.exec() == QDialog::Accepted;
+    return runDialog(dlg);
 }
 
 BrightnessContrastDialog::BrightnessContrastDialog(Document* doc, QWidget* parent)
@@ -61,6 +64,12 @@ BrightnessContrastDialog::BrightnessContrastDialog(Document* doc, QWidget* paren
 
 void BrightnessContrastDialog::processPreview(QImage& image) {
     BrightnessContrastEffect::process(image, m_doc->selection(), m_brightness, m_contrast);
+}
+
+EffectApplier BrightnessContrastDialog::applier() const {
+    return [p0 = m_brightness, p1 = m_contrast](QImage& image, const Selection& selection) {
+        BrightnessContrastEffect::process(image, selection, p0, p1);
+    };
 }
 
 } // namespace pdn

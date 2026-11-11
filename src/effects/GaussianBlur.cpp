@@ -1,181 +1,108 @@
 #include "GaussianBlur.h"
-#include "../core/History.h"
+#include "../core/Parallel.h"
 #include <QVBoxLayout>
 #include <QHBoxLayout>
 #include <QDialogButtonBox>
-#include <vector>
+#include <array>
 #include <cmath>
 #include <algorithm>
 
 namespace pdn {
 
-// Fast box blur horizontal pass
-static void boxBlurH(const uint32_t* src, uint32_t* dst, int w, int h, int r) {
-    float iarr = 1.0f / (r + r + 1);
-    for (int i = 0; i < h; ++i) {
-        int ti = i * w;
-        int li = ti;
-        int ri = ti + r;
+namespace {
 
-        uint32_t fv = src[ti];
-        uint32_t lv = src[ti + w - 1];
+constexpr int kBoxPasses = 3; // three box blurs approximate a Gaussian closely
 
-        int valA = ((fv >> 24) & 0xFF) * (r + 1);
-        int valR = ((fv >> 16) & 0xFF) * (r + 1);
-        int valG = ((fv >> 8) & 0xFF) * (r + 1);
-        int valB = (fv & 0xFF) * (r + 1);
+// Box radii whose successive application approximates a Gaussian of the given sigma
+// (Kovesi, "Fast Almost-Gaussian Filtering").
+std::array<int, kBoxPasses> boxRadiiForSigma(double sigma) {
+    const double idealWidth = std::sqrt(12.0 * sigma * sigma / kBoxPasses + 1.0);
+    int lower = static_cast<int>(std::floor(idealWidth));
+    if (lower % 2 == 0) --lower;
+    const int upper = lower + 2;
+    const double idealLowerCount =
+        (12.0 * sigma * sigma - kBoxPasses * lower * lower - 4.0 * kBoxPasses * lower - 3.0 * kBoxPasses) /
+        (-4.0 * lower - 4.0);
+    const int lowerCount = static_cast<int>(std::round(idealLowerCount));
+    std::array<int, kBoxPasses> radii;
+    for (int i = 0; i < kBoxPasses; ++i) {
+        radii[i] = std::max(0, ((i < lowerCount ? lower : upper) - 1) / 2);
+    }
+    return radii;
+}
 
-        for (int j = 0; j < r; ++j) {
-            uint32_t cur = src[ti + std::min(j, w - 1)];
-            valA += (cur >> 24) & 0xFF;
-            valR += (cur >> 16) & 0xFF;
-            valG += (cur >> 8) & 0xFF;
-            valB += cur & 0xFF;
-        }
+// Box-blurs one line of n premultiplied pixels (rows: stride 1, columns: stride = pixels per row).
+// The window slides along the line with edge pixels repeated, so any radius is safe for any n.
+void boxBlurLine(const uint32_t* src, uint32_t* dst, int n, qsizetype stride, int radius) {
+    const float scale = 1.0f / (2 * radius + 1);
+    auto at = [&](int i) { return src[std::clamp(i, 0, n - 1) * stride]; };
 
-        for (int j = 0; j <= r; ++j) {
-            uint32_t cur = src[std::min(ri++, ti + w - 1)];
-            valA += ((cur >> 24) & 0xFF) - ((fv >> 24) & 0xFF);
-            valR += ((cur >> 16) & 0xFF) - ((fv >> 16) & 0xFF);
-            valG += ((cur >> 8) & 0xFF) - ((fv >> 8) & 0xFF);
-            valB += (cur & 0xFF) - (fv & 0xFF);
+    int sumA = 0, sumR = 0, sumG = 0, sumB = 0;
+    auto add = [&](uint32_t px, int sign) {
+        sumA += sign * static_cast<int>(px >> 24);
+        sumR += sign * static_cast<int>((px >> 16) & 0xFF);
+        sumG += sign * static_cast<int>((px >> 8) & 0xFF);
+        sumB += sign * static_cast<int>(px & 0xFF);
+    };
+    for (int i = -radius; i <= radius; ++i) add(at(i), +1);
 
-            dst[ti++] = (static_cast<uint32_t>(valA * iarr + 0.5f) << 24) |
-                        (static_cast<uint32_t>(valR * iarr + 0.5f) << 16) |
-                        (static_cast<uint32_t>(valG * iarr + 0.5f) << 8) |
-                        static_cast<uint32_t>(valB * iarr + 0.5f);
-        }
-
-        for (int j = r + 1; j < w - r; ++j) {
-            uint32_t curR = src[ri++];
-            uint32_t curL = src[li++];
-            valA += ((curR >> 24) & 0xFF) - ((curL >> 24) & 0xFF);
-            valR += ((curR >> 16) & 0xFF) - ((curL >> 16) & 0xFF);
-            valG += ((curR >> 8) & 0xFF) - ((curL >> 8) & 0xFF);
-            valB += (curR & 0xFF) - (curL & 0xFF);
-
-            dst[ti++] = (static_cast<uint32_t>(valA * iarr + 0.5f) << 24) |
-                        (static_cast<uint32_t>(valR * iarr + 0.5f) << 16) |
-                        (static_cast<uint32_t>(valG * iarr + 0.5f) << 8) |
-                        static_cast<uint32_t>(valB * iarr + 0.5f);
-        }
-
-        for (int j = w - r; j < w; ++j) {
-            uint32_t curL = src[li++];
-            valA += ((lv >> 24) & 0xFF) - ((curL >> 24) & 0xFF);
-            valR += ((lv >> 16) & 0xFF) - ((curL >> 16) & 0xFF);
-            valG += ((lv >> 8) & 0xFF) - ((curL >> 8) & 0xFF);
-            valB += (lv & 0xFF) - (curL & 0xFF);
-
-            dst[ti++] = (static_cast<uint32_t>(valA * iarr + 0.5f) << 24) |
-                        (static_cast<uint32_t>(valR * iarr + 0.5f) << 16) |
-                        (static_cast<uint32_t>(valG * iarr + 0.5f) << 8) |
-                        static_cast<uint32_t>(valB * iarr + 0.5f);
-        }
+    for (int i = 0; i < n; ++i) {
+        dst[i * stride] = (static_cast<uint32_t>(sumA * scale + 0.5f) << 24) |
+                          (static_cast<uint32_t>(sumR * scale + 0.5f) << 16) |
+                          (static_cast<uint32_t>(sumG * scale + 0.5f) << 8) |
+                          static_cast<uint32_t>(sumB * scale + 0.5f);
+        add(at(i + radius + 1), +1);
+        add(at(i - radius), -1);
     }
 }
 
-// Fast box blur vertical pass
-static void boxBlurT(const uint32_t* src, uint32_t* dst, int w, int h, int r) {
-    float iarr = 1.0f / (r + r + 1);
-    for (int i = 0; i < w; ++i) {
-        int ti = i;
-        int li = ti;
-        int ri = ti + r * w;
-
-        uint32_t fv = src[ti];
-        uint32_t lv = src[ti + w * (h - 1)];
-
-        int valA = ((fv >> 24) & 0xFF) * (r + 1);
-        int valR = ((fv >> 16) & 0xFF) * (r + 1);
-        int valG = ((fv >> 8) & 0xFF) * (r + 1);
-        int valB = (fv & 0xFF) * (r + 1);
-
-        for (int j = 0; j < r; ++j) {
-            uint32_t cur = src[ti + std::min(j, h - 1) * w];
-            valA += (cur >> 24) & 0xFF;
-            valR += (cur >> 16) & 0xFF;
-            valG += (cur >> 8) & 0xFF;
-            valB += cur & 0xFF;
-        }
-
-        for (int j = 0; j <= r; ++j) {
-            uint32_t cur = src[std::min(ri, ti + (h - 1) * w)];
-            ri += w;
-            valA += ((cur >> 24) & 0xFF) - ((fv >> 24) & 0xFF);
-            valR += ((cur >> 16) & 0xFF) - ((fv >> 16) & 0xFF);
-            valG += ((cur >> 8) & 0xFF) - ((fv >> 8) & 0xFF);
-            valB += (cur & 0xFF) - (fv & 0xFF);
-
-            dst[ti] = (static_cast<uint32_t>(valA * iarr + 0.5f) << 24) |
-                      (static_cast<uint32_t>(valR * iarr + 0.5f) << 16) |
-                      (static_cast<uint32_t>(valG * iarr + 0.5f) << 8) |
-                      static_cast<uint32_t>(valB * iarr + 0.5f);
-            ti += w;
-        }
-
-        for (int j = r + 1; j < h - r; ++j) {
-            uint32_t curR = src[ri];
-            uint32_t curL = src[li];
-            ri += w;
-            li += w;
-            valA += ((curR >> 24) & 0xFF) - ((curL >> 24) & 0xFF);
-            valR += ((curR >> 16) & 0xFF) - ((curL >> 16) & 0xFF);
-            valG += ((curR >> 8) & 0xFF) - ((curL >> 8) & 0xFF);
-            valB += (curR & 0xFF) - (curL & 0xFF);
-
-            dst[ti] = (static_cast<uint32_t>(valA * iarr + 0.5f) << 24) |
-                      (static_cast<uint32_t>(valR * iarr + 0.5f) << 16) |
-                      (static_cast<uint32_t>(valG * iarr + 0.5f) << 8) |
-                      static_cast<uint32_t>(valB * iarr + 0.5f);
-            ti += w;
-        }
-
-        for (int j = h - r; j < h; ++j) {
-            uint32_t curL = src[li];
-            li += w;
-            valA += ((lv >> 24) & 0xFF) - ((curL >> 24) & 0xFF);
-            valR += ((lv >> 16) & 0xFF) - ((curL >> 16) & 0xFF);
-            valG += ((lv >> 8) & 0xFF) - ((curL >> 8) & 0xFF);
-            valB += (lv & 0xFF) - (curL & 0xFF);
-
-            dst[ti] = (static_cast<uint32_t>(valA * iarr + 0.5f) << 24) |
-                      (static_cast<uint32_t>(valR * iarr + 0.5f) << 16) |
-                      (static_cast<uint32_t>(valG * iarr + 0.5f) << 8) |
-                      static_cast<uint32_t>(valB * iarr + 0.5f);
-            ti += w;
-        }
-    }
-}
+} // namespace
 
 void GaussianBlurEffect::process(QImage& image, const Selection& selection, int radius) {
     if (radius <= 0) return;
-    int w = image.width();
-    int h = image.height();
+    const int w = image.width();
+    const int h = image.height();
     if (w <= 0 || h <= 0) return;
 
-    std::vector<uint32_t> buf(w * h);
-    const uint32_t* src = reinterpret_cast<const uint32_t*>(image.constBits());
-    uint32_t* dst = buf.data();
+    // Blur premultiplied pixels: otherwise the (arbitrary) colour of fully transparent pixels
+    // bleeds into their visible neighbours and produces dark or coloured fringes.
+    QImage work = image.convertToFormat(QImage::Format_ARGB32_Premultiplied);
+    QImage scratch(w, h, QImage::Format_ARGB32_Premultiplied);
+    auto* a = reinterpret_cast<uint32_t*>(work.bits());
+    auto* b = reinterpret_cast<uint32_t*>(scratch.bits());
+    const qsizetype stride = work.bytesPerLine() / 4;
 
-    // 3 passes of box blur = excellent approximation of Gaussian blur
-    boxBlurH(src, dst, w, h, radius);
-    boxBlurT(dst, reinterpret_cast<uint32_t*>(image.bits()), w, h, radius);
-
-    // Apply back only inside selection if selection is active
-    if (!selection.isEmpty()) {
-        uint32_t* imgBits = reinterpret_cast<uint32_t*>(image.bits());
-        for (int y = 0; y < h; ++y) {
-            for (int x = 0; x < w; ++x) {
-                if (!selection.containsPixel(x, y)) {
-                    imgBits[y * w + x] = src[y * w + x];
-                }
-            }
-        }
+    // The slider value is the blur radius in pixels, i.e. roughly two standard deviations.
+    for (int boxRadius : boxRadiiForSigma(std::max(0.5, radius / 2.0))) {
+        if (boxRadius == 0) continue;
+        parallelFor(0, h, 32, [&](int y0, int y1) {
+            for (int y = y0; y < y1; ++y) boxBlurLine(a + y * stride, b + y * stride, w, 1, boxRadius);
+        });
+        parallelFor(0, w, 32, [&](int x0, int x1) {
+            for (int x = x0; x < x1; ++x) boxBlurLine(b + x, a + x, h, stride, boxRadius);
+        });
     }
+
+    const QImage blurred = work.convertToFormat(QImage::Format_ARGB32);
+    image.detach();
+    const QImage* mask = selection.isEmpty() ? nullptr : &selection.mask(w, h);
+    parallelRows(h, [&](int y) {
+        auto* dst = reinterpret_cast<uint32_t*>(image.scanLine(y));
+        const auto* src = reinterpret_cast<const uint32_t*>(blurred.constScanLine(y));
+        if (!mask) {
+            std::copy(src, src + w, dst);
+            return;
+        }
+        // Only selected pixels take the blurred value
+        const uint8_t* maskRow = mask->constScanLine(y);
+        for (int x = 0; x < w; ++x) {
+            if (maskRow[x]) dst[x] = src[x];
+        }
+    });
 }
 
 bool GaussianBlurEffect::apply(QImage& image, const Selection& selection) {
+    if (applyRemembered(image, selection)) return true;
     process(image, selection, 5);
     return true;
 }
@@ -183,7 +110,7 @@ bool GaussianBlurEffect::apply(QImage& image, const Selection& selection) {
 bool GaussianBlurEffect::showDialog(QWidget* parent, Document* doc) {
     if (!doc || !doc->activeLayer()) return false;
     GaussianBlurDialog dlg(doc, parent);
-    return dlg.exec() == QDialog::Accepted;
+    return runDialog(dlg);
 }
 
 GaussianBlurDialog::GaussianBlurDialog(Document* doc, QWidget* parent)
@@ -196,6 +123,12 @@ GaussianBlurDialog::GaussianBlurDialog(Document* doc, QWidget* parent)
 
 void GaussianBlurDialog::processPreview(QImage& image) {
     GaussianBlurEffect::process(image, m_doc->selection(), m_radius);
+}
+
+EffectApplier GaussianBlurDialog::applier() const {
+    return [p0 = m_radius](QImage& image, const Selection& selection) {
+        GaussianBlurEffect::process(image, selection, p0);
+    };
 }
 
 } // namespace pdn

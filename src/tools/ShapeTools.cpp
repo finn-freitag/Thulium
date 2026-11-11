@@ -1,131 +1,186 @@
 #include "ShapeTools.h"
-#include "../core/History.h"
 #include <QPainter>
+#include <QLineF>
+#include <algorithm>
 #include <cmath>
 
 namespace pdn {
 
+namespace {
+
+void clipToSelection(QPainter& p, const Document* doc) {
+    if (!doc->selection().isEmpty()) {
+        p.setClipRegion(doc->selection().region());
+    }
+}
+
+QPolygonF regularPolygon(const QRectF& rect, int sides, qreal startAngle) {
+    QPolygonF poly;
+    const QPointF c = rect.center();
+    for (int i = 0; i < sides; ++i) {
+        const qreal angle = startAngle + i * 2.0 * M_PI / sides;
+        poly << QPointF(c.x() + rect.width() / 2.0 * std::cos(angle), c.y() + rect.height() / 2.0 * std::sin(angle));
+    }
+    return poly;
+}
+
+} // namespace
+
 // --- ShapesTool ---
-void ShapesTool::mousePress(QMouseEvent* /*event*/, Document* doc, const QPointF& docPos, ToolContext& ctx) {
+QPainterPath ShapesTool::shapePath(ShapeType type, const QRectF& rect) {
+    QPainterPath path;
+    const qreal l = rect.left(), t = rect.top(), w = rect.width(), h = rect.height();
+    const QPointF c = rect.center();
+    switch (type) {
+        case ShapeType::Rectangle:
+            path.addRect(rect);
+            break;
+        case ShapeType::RoundedRectangle: {
+            const qreal radius = std::min({10.0, w / 2.0, h / 2.0});
+            path.addRoundedRect(rect, radius, radius);
+            break;
+        }
+        case ShapeType::Ellipse:
+            path.addEllipse(rect);
+            break;
+        case ShapeType::Diamond:
+            path.addPolygon(QPolygonF({QPointF(c.x(), t), QPointF(rect.right(), c.y()),
+                                       QPointF(c.x(), rect.bottom()), QPointF(l, c.y())}));
+            break;
+        case ShapeType::Triangle:
+            path.addPolygon(QPolygonF({QPointF(c.x(), t), rect.bottomRight(), rect.bottomLeft()}));
+            break;
+        case ShapeType::Star: {
+            QPolygonF poly;
+            for (int i = 0; i < 10; ++i) {
+                const qreal angle = -M_PI / 2.0 + i * (M_PI / 5.0);
+                const qreal r = (i % 2 == 0) ? 1.0 : 0.45;
+                poly << QPointF(c.x() + w / 2.0 * r * std::cos(angle), c.y() + h / 2.0 * r * std::sin(angle));
+            }
+            path.addPolygon(poly);
+            break;
+        }
+        case ShapeType::Pentagon:
+            path.addPolygon(regularPolygon(rect, 5, -M_PI / 2.0));
+            break;
+        case ShapeType::Hexagon:
+            path.addPolygon(regularPolygon(rect, 6, 0.0));
+            break;
+        case ShapeType::Arrow:
+            path.addPolygon(QPolygonF({QPointF(l, t + h * 0.3), QPointF(l + w * 0.6, t + h * 0.3),
+                                       QPointF(l + w * 0.6, t), QPointF(l + w, c.y()),
+                                       QPointF(l + w * 0.6, t + h), QPointF(l + w * 0.6, t + h * 0.7),
+                                       QPointF(l, t + h * 0.7)}));
+            break;
+        case ShapeType::Heart:
+            path.moveTo(c.x(), t + h * 0.28);
+            path.cubicTo(c.x() + w * 0.12, t - h * 0.05, l + w * 1.05, t + h * 0.02, l + w, t + h * 0.38);
+            path.cubicTo(l + w, t + h * 0.62, c.x() + w * 0.18, t + h * 0.82, c.x(), t + h);
+            path.cubicTo(c.x() - w * 0.18, t + h * 0.82, l, t + h * 0.62, l, t + h * 0.38);
+            path.cubicTo(l - w * 0.05, t + h * 0.02, c.x() - w * 0.12, t - h * 0.05, c.x(), t + h * 0.28);
+            break;
+    }
+    path.closeSubpath();
+    return path;
+}
+
+QRectF ShapesTool::shapeRect(bool constrainSquare) const {
+    QPointF end = m_currentPos;
+    if (constrainSquare) {
+        // Hold Shift for equal width and height
+        const QPointF d = end - m_startPos;
+        const qreal side = std::max(std::abs(d.x()), std::abs(d.y()));
+        end = m_startPos + QPointF(d.x() < 0 ? -side : side, d.y() < 0 ? -side : side);
+    }
+    return QRectF(m_startPos, end).normalized();
+}
+
+void ShapesTool::deactivate(Document* /*doc*/, ToolContext& /*ctx*/) {
+    m_drawing = false;
+}
+
+void ShapesTool::mousePress(QMouseEvent* event, Document* doc, const QPointF& docPos, ToolContext& ctx) {
     auto layer = doc->activeLayer();
     if (!layer || !layer->isVisible()) return;
 
-    m_undoSnapshot = layer->image().copy();
+    // The right button draws with the colour roles swapped
+    const bool swapped = event && event->button() == Qt::RightButton;
+    m_outlineColor = swapped ? ctx.secondaryColor : ctx.primaryColor;
+    m_fillColor = swapped ? ctx.primaryColor : ctx.secondaryColor;
+    m_shapeType = ctx.shapeType;
+    m_fillMode = ctx.fillMode;
+    m_penWidth = ctx.brushWidth;
+    m_antiAliasing = ctx.antiAliasing;
     m_startPos = docPos;
     m_currentPos = docPos;
+    m_constrain = false;
     m_drawing = true;
-    m_currentCtx = ctx;
 }
 
-void ShapesTool::mouseMove(QMouseEvent* /*event*/, Document* doc, const QPointF& docPos, ToolContext& /*ctx*/) {
+void ShapesTool::mouseMove(QMouseEvent* event, Document* /*doc*/, const QPointF& docPos, ToolContext& /*ctx*/) {
     if (!m_drawing) return;
     m_currentPos = docPos;
-    emit doc->documentChanged();
+    m_constrain = event && (event->modifiers() & Qt::ShiftModifier);
 }
 
-void ShapesTool::renderShape(QPainter& p, const QRectF& rect, const ToolContext& ctx) {
-    p.setRenderHint(QPainter::Antialiasing, ctx.antiAliasing);
-
-    QPen pen(ctx.primaryColor, ctx.brushWidth, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin);
-    QBrush brush(ctx.secondaryColor);
-
-    if (ctx.fillMode == FillMode::OutlineOnly) {
-        p.setPen(pen);
-        p.setBrush(Qt::NoBrush);
-    } else if (ctx.fillMode == FillMode::FillOnly) {
-        p.setPen(Qt::NoPen);
-        p.setBrush(QBrush(ctx.primaryColor));
-    } else { // OutlineAndFill
-        p.setPen(pen);
-        p.setBrush(brush);
-    }
-
-    switch (ctx.shapeType) {
-        case ShapeType::Rectangle:
-            p.drawRect(rect);
+void ShapesTool::renderShape(QPainter& p, const QRectF& rect, qreal penWidth) const {
+    p.setRenderHint(QPainter::Antialiasing, m_antiAliasing);
+    const QPen pen(m_outlineColor, penWidth, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin);
+    switch (m_fillMode) {
+        case FillMode::OutlineOnly:
+            p.setPen(pen);
+            p.setBrush(Qt::NoBrush);
             break;
-        case ShapeType::RoundedRectangle:
-            p.drawRoundedRect(rect, 10, 10);
+        case FillMode::FillOnly:
+            p.setPen(Qt::NoPen);
+            p.setBrush(m_outlineColor);
             break;
-        case ShapeType::Ellipse:
-            p.drawEllipse(rect);
-            break;
-        case ShapeType::Diamond: {
-            QPolygonF poly;
-            poly << QPointF(rect.center().x(), rect.top())
-                 << QPointF(rect.right(), rect.center().y())
-                 << QPointF(rect.center().x(), rect.bottom())
-                 << QPointF(rect.left(), rect.center().y());
-            p.drawPolygon(poly);
-            break;
-        }
-        case ShapeType::Triangle: {
-            QPolygonF poly;
-            poly << QPointF(rect.center().x(), rect.top())
-                 << QPointF(rect.right(), rect.bottom())
-                 << QPointF(rect.left(), rect.bottom());
-            p.drawPolygon(poly);
-            break;
-        }
-        case ShapeType::Star: {
-            QPolygonF poly;
-            qreal cx = rect.center().x();
-            qreal cy = rect.center().y();
-            qreal rx = rect.width() / 2.0;
-            qreal ry = rect.height() / 2.0;
-            for (int i = 0; i < 10; ++i) {
-                qreal angle = -M_PI / 2.0 + i * (M_PI / 5.0);
-                qreal r = (i % 2 == 0) ? 1.0 : 0.45;
-                poly << QPointF(cx + rx * r * std::cos(angle), cy + ry * r * std::sin(angle));
-            }
-            p.drawPolygon(poly);
-            break;
-        }
-        default:
-            p.drawRect(rect);
+        case FillMode::OutlineAndFill:
+            p.setPen(pen);
+            p.setBrush(m_fillColor);
             break;
     }
+    p.drawPath(shapePath(m_shapeType, rect));
 }
 
-void ShapesTool::mouseRelease(QMouseEvent* /*event*/, Document* doc, const QPointF& docPos, ToolContext& ctx) {
+void ShapesTool::mouseRelease(QMouseEvent* event, Document* doc, const QPointF& docPos, ToolContext& /*ctx*/) {
     if (!m_drawing) return;
     m_drawing = false;
     m_currentPos = docPos;
+    m_constrain = event && (event->modifiers() & Qt::ShiftModifier);
 
-    auto layer = doc->activeLayer();
-    if (layer) {
-        QRectF rect(m_startPos, m_currentPos);
-        rect = rect.normalized();
+    const QRectF rect = shapeRect(m_constrain);
+    if (rect.width() < 1.0 && rect.height() < 1.0) return; // a click draws nothing
 
-        QPainter p(&layer->image());
-        if (!doc->selection().isEmpty()) {
-            p.setClipPath(doc->selection().path());
-        }
-        renderShape(p, rect, ctx);
-        p.end();
-
-        doc->undoStack()->push(new LayerBitmapUndoCommand(doc, doc->activeLayerIndex(), m_undoSnapshot, "Draw Shape"));
+    LayerEdit edit;
+    if (!edit.begin(doc)) return;
+    const int pad = m_penWidth / 2 + 2;
+    const QRect touched = rect.toAlignedRect().adjusted(-pad, -pad, pad, pad);
+    edit.prepare(touched);
+    {
+        QPainter p(&edit.layer()->image());
+        clipToSelection(p, doc);
+        renderShape(p, rect, m_penWidth);
     }
+    edit.markDirty(touched);
+    edit.commit("Draw Shape");
+}
 
-    emit doc->documentChanged();
+void ShapesTool::keyPress(QKeyEvent* event, Document* /*doc*/, ToolContext& /*ctx*/) {
+    if (event->key() == Qt::Key_Escape && m_drawing) {
+        m_drawing = false;
+        event->accept();
+    }
 }
 
 void ShapesTool::drawOverlay(QPainter& painter, const RenderOptions& opts) {
     if (!m_drawing) return;
 
-    QRectF docRect(m_startPos, m_currentPos);
-    docRect = docRect.normalized();
-
-    QRectF vpRect(opts.panOffset.x() + docRect.x() * opts.zoom,
-                  opts.panOffset.y() + docRect.y() * opts.zoom,
-                  docRect.width() * opts.zoom,
-                  docRect.height() * opts.zoom);
+    const QRectF docRect = shapeRect(m_constrain);
+    const QRectF vpRect(opts.panOffset + docRect.topLeft() * opts.zoom, docRect.size() * opts.zoom);
 
     painter.save();
-    ToolContext previewCtx = m_currentCtx;
-    previewCtx.brushWidth = static_cast<int>(previewCtx.brushWidth * opts.zoom);
-    if (previewCtx.brushWidth < 1) previewCtx.brushWidth = 1;
-    renderShape(painter, vpRect, previewCtx);
+    renderShape(painter, vpRect, std::max(1.0, m_penWidth * opts.zoom));
     painter.restore();
 }
 
@@ -146,21 +201,23 @@ void LineCurveTool::commit(Document* doc, const ToolContext& ctx) {
         return;
     }
 
-    auto layer = doc->activeLayer();
-    if (layer) {
-        QPainter p(&layer->image());
-        if (!doc->selection().isEmpty()) {
-            p.setClipPath(doc->selection().path());
+    if (m_edit.isActive()) {
+        const int pad = ctx.brushWidth / 2 + 2;
+        QPolygonF hull;
+        hull << m_p1 << m_c1 << m_c2 << m_p2; // a Bezier curve stays inside its control polygon
+        const QRect touched = hull.boundingRect().toAlignedRect().adjusted(-pad, -pad, pad, pad);
+        m_edit.prepare(touched);
+        {
+            QPainter p(&m_edit.layer()->image());
+            clipToSelection(p, doc);
+            renderLine(p, ctx);
         }
-        renderLine(p, ctx);
-        p.end();
-
-        doc->undoStack()->push(new LayerBitmapUndoCommand(doc, doc->activeLayerIndex(), m_undoSnapshot, "Line / Curve"));
+        m_edit.markDirty(touched);
+        m_edit.commit("Line / Curve");
     }
 
     m_state = Idle;
     m_draggedHandle = -1;
-    emit doc->documentChanged();
 }
 
 int LineCurveTool::hitTestHandle(const QPointF& docPos, double threshold) const {
@@ -197,8 +254,6 @@ double LineCurveTool::distanceToCurve(const QPointF& docPos, double& outT) const
 
 void LineCurveTool::mousePress(QMouseEvent* /*event*/, Document* doc, const QPointF& docPos, ToolContext& ctx) {
     m_currentCtx = ctx;
-    auto layer = doc->activeLayer();
-    if (!layer || !layer->isVisible()) return;
 
     if (m_state == AdjustingCurve) {
         double threshold = std::max(10.0, ctx.brushWidth * 0.5 + 6.0);
@@ -220,7 +275,6 @@ void LineCurveTool::mousePress(QMouseEvent* /*event*/, Document* doc, const QPoi
                 m_c2 = docPos;
             }
             m_state = DraggingHandle;
-            emit doc->documentChanged();
             return;
         }
 
@@ -228,21 +282,29 @@ void LineCurveTool::mousePress(QMouseEvent* /*event*/, Document* doc, const QPoi
         commit(doc, ctx);
     }
 
-    m_undoSnapshot = layer->image().copy();
+    if (!m_edit.begin(doc)) return;
     m_p1 = docPos;
     m_p2 = docPos;
     m_c1 = docPos;
     m_c2 = docPos;
     m_state = DrawingBaseLine;
-    emit doc->documentChanged();
 }
 
-void LineCurveTool::mouseMove(QMouseEvent* /*event*/, Document* doc, const QPointF& docPos, ToolContext& /*ctx*/) {
+void LineCurveTool::setBaseLineEnd(const QPointF& docPos, bool constrainAngle) {
+    m_p2 = docPos;
+    if (constrainAngle) {
+        // Hold Shift to snap the line to multiples of 15 degrees
+        QLineF line(m_p1, m_p2);
+        line.setAngle(std::round(line.angle() / 15.0) * 15.0);
+        m_p2 = line.p2();
+    }
+    m_c1 = m_p1 + (m_p2 - m_p1) / 3.0;
+    m_c2 = m_p1 + (m_p2 - m_p1) * 2.0 / 3.0;
+}
+
+void LineCurveTool::mouseMove(QMouseEvent* event, Document* /*doc*/, const QPointF& docPos, ToolContext& /*ctx*/) {
     if (m_state == DrawingBaseLine) {
-        m_p2 = docPos;
-        m_c1 = m_p1 + (m_p2 - m_p1) * 0.333;
-        m_c2 = m_p1 + (m_p2 - m_p1) * 0.666;
-        emit doc->documentChanged();
+        setBaseLineEnd(docPos, event && (event->modifiers() & Qt::ShiftModifier));
     } else if (m_state == DraggingHandle) {
         switch (m_draggedHandle) {
             case 0: m_p1 = docPos; break;
@@ -250,25 +312,21 @@ void LineCurveTool::mouseMove(QMouseEvent* /*event*/, Document* doc, const QPoin
             case 2: m_c2 = docPos; break;
             case 3: m_p2 = docPos; break;
         }
-        emit doc->documentChanged();
     }
 }
 
-void LineCurveTool::mouseRelease(QMouseEvent* /*event*/, Document* doc, const QPointF& docPos, ToolContext& /*ctx*/) {
+void LineCurveTool::mouseRelease(QMouseEvent* event, Document* /*doc*/, const QPointF& docPos, ToolContext& /*ctx*/) {
     if (m_state == DrawingBaseLine) {
-        m_p2 = docPos;
-        m_c1 = m_p1 + (m_p2 - m_p1) * 0.333;
-        m_c2 = m_p1 + (m_p2 - m_p1) * 0.666;
+        setBaseLineEnd(docPos, event && (event->modifiers() & Qt::ShiftModifier));
         if (std::hypot(m_p2.x() - m_p1.x(), m_p2.y() - m_p1.y()) > 2.0) {
             m_state = AdjustingCurve;
         } else {
             m_state = Idle;
+            m_edit.cancel();
         }
-        emit doc->documentChanged();
     } else if (m_state == DraggingHandle) {
         m_state = AdjustingCurve;
         m_draggedHandle = -1;
-        emit doc->documentChanged();
     }
 }
 
@@ -284,7 +342,7 @@ void LineCurveTool::keyPress(QKeyEvent* event, Document* doc, ToolContext& ctx) 
     if (event->key() == Qt::Key_Escape) {
         m_state = Idle;
         m_draggedHandle = -1;
-        emit doc->documentChanged();
+        m_edit.cancel();
         event->accept();
         return;
     }

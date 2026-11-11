@@ -1,10 +1,31 @@
 #include "Document.h"
 #include "History.h"
+#include "Parallel.h"
 #include <QFileInfo>
 #include <QPainter>
 #include <algorithm>
+#include <cstring>
 
 namespace pdn {
+
+ImageTransform inverseTransform(ImageTransform op) {
+    switch (op) {
+        case ImageTransform::Rotate90CW:  return ImageTransform::Rotate90CCW;
+        case ImageTransform::Rotate90CCW: return ImageTransform::Rotate90CW;
+        default:                          return op; // flips and 180° are their own inverse
+    }
+}
+
+QString imageTransformName(ImageTransform op) {
+    switch (op) {
+        case ImageTransform::FlipHorizontal: return "Flip Horizontal";
+        case ImageTransform::FlipVertical:   return "Flip Vertical";
+        case ImageTransform::Rotate90CW:     return "Rotate 90° Clockwise";
+        case ImageTransform::Rotate90CCW:    return "Rotate 90° Counter-Clockwise";
+        case ImageTransform::Rotate180:      return "Rotate 180°";
+    }
+    return "Transform";
+}
 
 Document::Document(int width, int height, QObject* parent)
     : Document(width, height, false, parent) {
@@ -19,6 +40,7 @@ Document::Document(int width, int height, bool transparentBackground, QObject* p
     }
     m_layers.append(bg);
     m_activeLayerIndex = 0;
+    connect(this, &Document::documentChanged, this, [this]() { emit pixelsChanged(bounds()); });
 }
 
 Document::Document(const QImage& initialImage, QObject* parent)
@@ -29,6 +51,14 @@ Document::Document(const QImage& initialImage, QObject* parent)
     auto bg = std::make_shared<Layer>(initialImage, "Background", true);
     m_layers.append(bg);
     m_activeLayerIndex = 0;
+    connect(this, &Document::documentChanged, this, [this]() { emit pixelsChanged(bounds()); });
+}
+
+void Document::notifyPixelsChanged(const QRect& rect) {
+    const QRect clipped = rect.intersected(bounds());
+    if (!clipped.isEmpty()) {
+        emit pixelsChanged(clipped);
+    }
 }
 
 void Document::setFilePath(const QString& path) {
@@ -208,14 +238,16 @@ bool Document::mergeLayerDown(int index, bool recordUndo) {
     auto topLayer = m_layers.at(index);
     auto bottomLayer = m_layers.at(index - 1);
 
-    QImage oldBottomImage;
-    if (recordUndo) {
-        oldBottomImage = bottomLayer->image().copy();
-    }
+    // Implicitly shared: becomes the "before" copy when the blend below detaches the layer image.
+    const QImage oldBottomImage = bottomLayer->image();
 
-    // Blend topLayer onto bottomLayer
-    int count = m_width * m_height;
-    blendImages(bottomLayer->bits(), topLayer->bits(), count, topLayer->blendMode(), topLayer->opacity());
+    const Layer& top = *topLayer;
+    Layer& bottom = *bottomLayer;
+    bottom.bits(); // detach once, before the worker threads touch the scanlines
+    const int rowWidth = std::min(top.width(), bottom.width());
+    parallelRows(std::min(top.height(), bottom.height()), [&](int y) {
+        blendImages(bottom.scanLine(y), top.scanLine(y), rowWidth, top.blendMode(), top.opacity());
+    });
 
     // Remove top layer
     m_layers.removeAt(index);
@@ -239,6 +271,7 @@ FloatingSelectionState Document::floatingSelectionState() const {
     state.transform = m_floatingTransform;
     state.offset = m_floatingOffset;
     state.snapshot = m_floatingSnapshot;
+    state.snapshotOrigin = m_floatingSnapshotOrigin;
     state.layerIndex = m_floatingLayerIndex;
     state.isLifted = m_floatingIsLifted;
     state.actionName = m_floatingActionName;
@@ -252,10 +285,28 @@ void Document::setFloatingSelectionState(const FloatingSelectionState& state) {
     m_floatingTransform = state.transform;
     m_floatingOffset = state.offset;
     m_floatingSnapshot = state.snapshot;
+    m_floatingSnapshotOrigin = state.snapshotOrigin;
     m_floatingLayerIndex = state.layerIndex;
     m_floatingIsLifted = state.isLifted;
     m_floatingActionName = state.actionName;
     emit documentChanged();
+}
+
+void Document::resetFloatingState() {
+    m_hasFloatingSelection = false;
+    m_floatingImage = QImage();
+    m_originalFloatingImage = QImage();
+    m_floatingSnapshot = QImage();
+    m_floatingTransform = QTransform();
+    m_floatingIsLifted = false;
+}
+
+QRect Document::floatingBounds() const {
+    if (!m_hasFloatingSelection) return QRect();
+    const QImage& img = !m_originalFloatingImage.isNull() ? m_originalFloatingImage : m_floatingImage;
+    if (img.isNull()) return QRect();
+    // One extra pixel covers the antialiased edge of a rotated/scaled image.
+    return m_floatingTransform.mapRect(QRectF(img.rect())).toAlignedRect().adjusted(-1, -1, 1, 1);
 }
 
 void Document::createFloatingSelection(const QImage& image, const QPointF& offset, bool isLifted, const QString& actionName) {
@@ -265,16 +316,17 @@ void Document::createFloatingSelection(const QImage& image, const QPointF& offse
     auto layer = activeLayer();
     if (!layer) return;
 
-    m_originalFloatingImage = image.copy();
-    m_floatingImage = image.copy();
+    // QImage is implicitly shared, so these do not duplicate the pixel data.
+    m_floatingImage = image.convertToFormat(QImage::Format_ARGB32);
+    m_originalFloatingImage = m_floatingImage;
     m_floatingOffset = offset;
     m_floatingTransform = QTransform::fromTranslate(offset.x(), offset.y());
     m_floatingLayerIndex = m_activeLayerIndex;
-    m_floatingSnapshot = layer->image().copy();
+    m_floatingSnapshot = QImage(); // nothing was removed from the layer, so nothing to restore
     m_floatingIsLifted = isLifted;
     m_floatingActionName = actionName;
     m_hasFloatingSelection = true;
-    emit documentChanged();
+    notifyPixelsChanged(floatingBounds());
 }
 
 void Document::liftSelectionToFloating() {
@@ -282,68 +334,70 @@ void Document::liftSelectionToFloating() {
     auto layer = activeLayer();
     if (!layer) return;
 
-    m_floatingSnapshot = layer->image().copy();
+    const QRect srcRect = m_selection.region().boundingRect().intersected(bounds());
+    if (srcRect.isEmpty()) return;
+
+    m_floatingSnapshot = layer->image().copy(srcRect);
+    m_floatingSnapshotOrigin = srcRect.topLeft();
     m_floatingLayerIndex = m_activeLayerIndex;
     m_floatingIsLifted = true;
     m_floatingActionName = "Move Pixels";
 
-    QRectF bounds = m_selection.boundingRect();
-    QRect srcRect = bounds.toAlignedRect().intersected(QRect(0, 0, m_width, m_height));
-    if (srcRect.isEmpty()) return;
-
+    // Copy the selected pixels, strictly clipped to the selection shape
     m_floatingImage = QImage(srcRect.size(), QImage::Format_ARGB32);
     m_floatingImage.fill(Qt::transparent);
+    {
+        QPainter p(&m_floatingImage);
+        p.setCompositionMode(QPainter::CompositionMode_Source);
+        p.setClipRegion(m_selection.region().translated(-srcRect.topLeft()));
+        p.drawImage(QPoint(0, 0), layer->image(), srcRect);
+    }
 
-    // Copy selected pixels to floating image, strictly clipped to the selection outline
-    QPainter pFloat(&m_floatingImage);
-    pFloat.setClipPath(m_selection.path().translated(-srcRect.x(), -srcRect.y()));
-    pFloat.drawImage(-srcRect.x(), -srcRect.y(), layer->image());
-    pFloat.end();
+    // ...and leave a transparent hole behind on the layer
+    {
+        QPainter p(&layer->image());
+        p.setCompositionMode(QPainter::CompositionMode_Clear);
+        p.setClipRegion(m_selection.region());
+        p.fillRect(srcRect, Qt::transparent);
+    }
 
-    // Clear only the selected area on the layer
-    QPainter pLayer(&layer->image());
-    pLayer.setCompositionMode(QPainter::CompositionMode_Clear);
-    pLayer.fillPath(m_selection.path(), Qt::transparent);
-    pLayer.end();
-
-    m_originalFloatingImage = m_floatingImage.copy();
+    m_originalFloatingImage = m_floatingImage;
     m_floatingOffset = srcRect.topLeft();
     m_floatingTransform = QTransform::fromTranslate(srcRect.x(), srcRect.y());
     m_hasFloatingSelection = true;
 
-    emit documentChanged();
+    notifyPixelsChanged(srcRect);
 }
 
 void Document::moveFloatingSelection(const QPointF& delta) {
     if (!m_hasFloatingSelection) return;
+    const QRect before = floatingBounds();
     m_floatingOffset += delta;
     m_floatingTransform = m_floatingTransform * QTransform::fromTranslate(delta.x(), delta.y());
     m_selection.translate(delta.x(), delta.y());
     emit selectionChanged();
-    emit documentChanged();
+    notifyPixelsChanged(before.united(floatingBounds()));
 }
 
 void Document::setFloatingTransform(const QTransform& transform) {
     if (!m_hasFloatingSelection) return;
+    const QRect before = floatingBounds();
     m_floatingTransform = transform;
     m_floatingOffset = m_floatingTransform.map(QPointF(0, 0));
-    emit documentChanged();
+    notifyPixelsChanged(before.united(floatingBounds()));
 }
 
 void Document::bakeFloatingSelection(bool recordUndo, const QString& actionName) {
     if (!m_hasFloatingSelection) return;
     auto layer = this->layer(m_floatingLayerIndex);
     if (!layer) {
-        m_hasFloatingSelection = false;
-        m_floatingImage = QImage();
-        m_originalFloatingImage = QImage();
-        m_floatingTransform = QTransform();
-        m_floatingIsLifted = false;
+        resetFloatingState();
         emit documentChanged();
         return;
     }
 
-    QImage preBakeImage = layer->image().copy();
+    const QRect affected = floatingBounds().intersected(bounds());
+    const QImage preBakeImage = layer->image(); // shared; detached by the painter below
     const QImage& srcImg = !m_originalFloatingImage.isNull() ? m_originalFloatingImage : m_floatingImage;
     if (!srcImg.isNull()) {
         QPainter p(&layer->image());
@@ -351,45 +405,36 @@ void Document::bakeFloatingSelection(bool recordUndo, const QString& actionName)
         p.setRenderHint(QPainter::Antialiasing, true);
         p.setTransform(m_floatingTransform);
         p.drawImage(0, 0, srcImg);
-        p.end();
     }
-    QImage postBakeImage = layer->image().copy();
 
-    FloatingSelectionState state = floatingSelectionState();
-    QPainterPath preSelPath = m_selection.path();
+    const FloatingSelectionState state = floatingSelectionState();
+    const QRegion preSelection = m_selection.region();
+    const int layerIndex = m_floatingLayerIndex;
+    resetFloatingState();
 
-    m_hasFloatingSelection = false;
-    m_floatingImage = QImage();
-    m_originalFloatingImage = QImage();
-    m_floatingTransform = QTransform();
-    m_floatingIsLifted = false;
-
-    QString act = actionName.isEmpty() ? "Deselect" : actionName;
-    QPainterPath postSelPath = preSelPath;
+    const QString act = actionName.isEmpty() ? "Deselect" : actionName;
     if (act == "Deselect") {
         m_selection.clear();
-        postSelPath = QPainterPath();
         emit selectionChanged();
     }
 
     if (recordUndo) {
-        m_undoStack.push(new BakeFloatingUndoCommand(this, m_floatingLayerIndex, preBakeImage, postBakeImage, state, preSelPath, postSelPath, act));
+        m_undoStack.push(new BakeFloatingUndoCommand(this, layerIndex, preBakeImage, affected, state,
+                                                     preSelection, m_selection.region(), act));
     }
 
-    emit documentChanged();
+    notifyPixelsChanged(affected);
 }
 
 void Document::cancelFloatingSelection() {
     if (!m_hasFloatingSelection) return;
     auto layer = this->layer(m_floatingLayerIndex);
-    if (layer && m_floatingIsLifted) {
-        layer->setImage(m_floatingSnapshot.copy());
+    if (layer && m_floatingIsLifted && !m_floatingSnapshot.isNull()) {
+        QPainter p(&layer->image());
+        p.setCompositionMode(QPainter::CompositionMode_Source);
+        p.drawImage(m_floatingSnapshotOrigin, m_floatingSnapshot);
     }
-    m_hasFloatingSelection = false;
-    m_floatingImage = QImage();
-    m_originalFloatingImage = QImage();
-    m_floatingTransform = QTransform();
-    m_floatingIsLifted = false;
+    resetFloatingState();
     m_selection.clear();
     emit selectionChanged();
     emit documentChanged();
@@ -397,12 +442,9 @@ void Document::cancelFloatingSelection() {
 
 void Document::discardFloatingSelection() {
     if (!m_hasFloatingSelection) return;
-    m_hasFloatingSelection = false;
-    m_floatingImage = QImage();
-    m_originalFloatingImage = QImage();
-    m_floatingTransform = QTransform();
-    m_floatingIsLifted = false;
-    emit documentChanged();
+    const QRect affected = floatingBounds();
+    resetFloatingState();
+    notifyPixelsChanged(affected);
 }
 
 void Document::clearSelection() {
@@ -410,9 +452,9 @@ void Document::clearSelection() {
         bakeFloatingSelection(true, "Deselect");
         return;
     }
+    if (m_selection.isEmpty()) return;
     m_selection.clear();
     emit selectionChanged();
-    emit documentChanged();
 }
 
 void Document::selectAll() {
@@ -421,7 +463,6 @@ void Document::selectAll() {
     }
     m_selection.selectAll(m_width, m_height);
     emit selectionChanged();
-    emit documentChanged();
 }
 
 void Document::setDocumentDimensions(int width, int height) {
@@ -441,62 +482,64 @@ void Document::setLayers(const QList<std::shared_ptr<Layer>>& layers, int active
     emit documentChanged();
 }
 
+// --- Canvas geometry ---
+
+GeometrySnapshot Document::geometrySnapshot() const {
+    GeometrySnapshot snap;
+    snap.width = m_width;
+    snap.height = m_height;
+    snap.selection = m_selection.region();
+    snap.layerImages.reserve(m_layers.size());
+    for (const auto& l : m_layers) {
+        snap.layerImages.append(l->image());
+    }
+    return snap;
+}
+
+void Document::restoreGeometry(const GeometrySnapshot& snapshot) {
+    setDocumentDimensions(snapshot.width, snapshot.height);
+    for (int i = 0; i < m_layers.size() && i < snapshot.layerImages.size(); ++i) {
+        m_layers[i]->setImage(snapshot.layerImages[i]);
+    }
+    m_selection.setRegion(snapshot.selection);
+    emit selectionChanged();
+    emit documentChanged();
+}
+
+void Document::pushGeometryUndo(const GeometrySnapshot& before, const QString& text) {
+    m_undoStack.push(new ImageGeometryUndoCommand(this, before, geometrySnapshot(), text));
+}
+
 void Document::resizeCanvas(int newWidth, int newHeight, Qt::Alignment anchor, bool recordUndo) {
     if (newWidth <= 0 || newHeight <= 0) return;
     if (m_hasFloatingSelection) {
         bakeFloatingSelection();
     }
-
-    int oldW = m_width;
-    int oldH = m_height;
-    QPainterPath oldSel = m_selection.path();
-    QList<QImage> oldImgs;
-    if (recordUndo) {
-        for (const auto& l : m_layers) {
-            oldImgs.append(l->image().copy());
-        }
-    }
+    const GeometrySnapshot before = geometrySnapshot();
 
     int dx = 0;
     int dy = 0;
-
-    if (anchor & Qt::AlignRight) {
-        dx = newWidth - m_width;
-    } else if (anchor & Qt::AlignHCenter) {
-        dx = (newWidth - m_width) / 2;
-    }
-
-    if (anchor & Qt::AlignBottom) {
-        dy = newHeight - m_height;
-    } else if (anchor & Qt::AlignVCenter) {
-        dy = (newHeight - m_height) / 2;
-    }
+    if (anchor & Qt::AlignRight) dx = newWidth - m_width;
+    else if (anchor & Qt::AlignHCenter) dx = (newWidth - m_width) / 2;
+    if (anchor & Qt::AlignBottom) dy = newHeight - m_height;
+    else if (anchor & Qt::AlignVCenter) dy = (newHeight - m_height) / 2;
 
     for (auto& l : m_layers) {
         QImage newImg(newWidth, newHeight, QImage::Format_ARGB32);
         newImg.fill(l->isBackground() ? Qt::white : Qt::transparent);
         QPainter p(&newImg);
+        p.setCompositionMode(QPainter::CompositionMode_Source);
         p.drawImage(dx, dy, l->image());
         p.end();
         l->setImage(newImg);
     }
 
-    m_width = newWidth;
-    m_height = newHeight;
-    m_selection.setDimensions(m_width, m_height);
+    setDocumentDimensions(newWidth, newHeight);
     m_selection.clear();
     emit selectionChanged();
     emit documentChanged();
 
-    if (recordUndo) {
-        QList<QImage> newImgs;
-        for (const auto& l : m_layers) {
-            newImgs.append(l->image().copy());
-        }
-        m_undoStack.push(new ImageGeometryUndoCommand(this, oldW, oldH, oldImgs, oldSel,
-                                                     m_width, m_height, newImgs, m_selection.path(),
-                                                     "Canvas Size"));
-    }
+    if (recordUndo) pushGeometryUndo(before, "Canvas Size");
 }
 
 void Document::resizeImage(int newWidth, int newHeight, ResampleAlgorithm algo, bool recordUndo) {
@@ -504,36 +547,17 @@ void Document::resizeImage(int newWidth, int newHeight, ResampleAlgorithm algo, 
     if (m_hasFloatingSelection) {
         bakeFloatingSelection();
     }
-
-    int oldW = m_width;
-    int oldH = m_height;
-    QPainterPath oldSel = m_selection.path();
-    QList<QImage> oldImgs;
-    if (recordUndo) {
-        for (const auto& l : m_layers) {
-            oldImgs.append(l->image().copy());
-        }
-    }
+    const GeometrySnapshot before = geometrySnapshot();
 
     for (auto& l : m_layers) {
         l->setImage(Resampling::resample(l->image(), newWidth, newHeight, algo));
     }
-    m_width = newWidth;
-    m_height = newHeight;
-    m_selection.setDimensions(m_width, m_height);
+    setDocumentDimensions(newWidth, newHeight);
     m_selection.clear();
     emit selectionChanged();
     emit documentChanged();
 
-    if (recordUndo) {
-        QList<QImage> newImgs;
-        for (const auto& l : m_layers) {
-            newImgs.append(l->image().copy());
-        }
-        m_undoStack.push(new ImageGeometryUndoCommand(this, oldW, oldH, oldImgs, oldSel,
-                                                     m_width, m_height, newImgs, m_selection.path(),
-                                                     "Resize"));
-    }
+    if (recordUndo) pushGeometryUndo(before, "Resize");
 }
 
 void Document::resizeImage(int newWidth, int newHeight, Qt::TransformationMode mode) {
@@ -546,188 +570,108 @@ void Document::crop(const QRect& rect, bool recordUndo) {
     if (m_hasFloatingSelection) {
         bakeFloatingSelection();
     }
-    QRect validRect = rect.intersected(QRect(0, 0, m_width, m_height));
+    const QRect validRect = rect.intersected(bounds());
     if (validRect.isEmpty()) return;
-
-    int oldW = m_width;
-    int oldH = m_height;
-    QPainterPath oldSel = m_selection.path();
-    QList<QImage> oldImgs;
-    if (recordUndo) {
-        for (const auto& l : m_layers) {
-            oldImgs.append(l->image().copy());
-        }
-    }
+    const GeometrySnapshot before = geometrySnapshot();
 
     for (auto& l : m_layers) {
         l->crop(validRect);
     }
-    m_width = validRect.width();
-    m_height = validRect.height();
-    m_selection.setDimensions(m_width, m_height);
+    setDocumentDimensions(validRect.width(), validRect.height());
     m_selection.clear();
     emit selectionChanged();
     emit documentChanged();
 
-    if (recordUndo) {
-        QList<QImage> newImgs;
-        for (const auto& l : m_layers) {
-            newImgs.append(l->image().copy());
-        }
-        m_undoStack.push(new ImageGeometryUndoCommand(this, oldW, oldH, oldImgs, oldSel,
-                                                     m_width, m_height, newImgs, m_selection.path(),
-                                                     "Crop to Selection"));
-    }
+    if (recordUndo) pushGeometryUndo(before, "Crop to Selection");
 }
 
-void Document::flipHorizontal(bool recordUndo) {
+void Document::cropToSelection(bool recordUndo) {
     if (m_hasFloatingSelection) {
-        bakeFloatingSelection();
+        bakeFloatingSelection(true, "Finish Move Pixels");
     }
+    if (m_selection.isEmpty()) return;
+    const QRect cropRect = m_selection.region().boundingRect().intersected(bounds());
+    if (cropRect.isEmpty()) return;
+    const GeometrySnapshot before = geometrySnapshot();
 
-    int oldW = m_width;
-    int oldH = m_height;
-    QPainterPath oldSel = m_selection.path();
-    QList<QImage> oldImgs;
-    if (recordUndo) {
-        for (const auto& l : m_layers) {
-            oldImgs.append(l->image().copy());
+    // Everything inside the bounding box but outside the selected shape becomes transparent.
+    const QRegion outside = QRegion(cropRect).subtracted(m_selection.region()).translated(-cropRect.topLeft());
+    for (auto& l : m_layers) {
+        l->crop(cropRect);
+        if (!outside.isEmpty()) {
+            QPainter p(&l->image());
+            p.setCompositionMode(QPainter::CompositionMode_Clear);
+            p.setClipRegion(outside);
+            p.fillRect(l->image().rect(), Qt::transparent);
         }
     }
-
-    for (auto& l : m_layers) l->flipHorizontal();
-    emit documentChanged();
-
-    if (recordUndo) {
-        QList<QImage> newImgs;
-        for (const auto& l : m_layers) {
-            newImgs.append(l->image().copy());
-        }
-        m_undoStack.push(new ImageGeometryUndoCommand(this, oldW, oldH, oldImgs, oldSel,
-                                                     m_width, m_height, newImgs, m_selection.path(),
-                                                     "Flip Horizontal"));
-    }
-}
-
-void Document::flipVertical(bool recordUndo) {
-    if (m_hasFloatingSelection) {
-        bakeFloatingSelection();
-    }
-
-    int oldW = m_width;
-    int oldH = m_height;
-    QPainterPath oldSel = m_selection.path();
-    QList<QImage> oldImgs;
-    if (recordUndo) {
-        for (const auto& l : m_layers) {
-            oldImgs.append(l->image().copy());
-        }
-    }
-
-    for (auto& l : m_layers) l->flipVertical();
-    emit documentChanged();
-
-    if (recordUndo) {
-        QList<QImage> newImgs;
-        for (const auto& l : m_layers) {
-            newImgs.append(l->image().copy());
-        }
-        m_undoStack.push(new ImageGeometryUndoCommand(this, oldW, oldH, oldImgs, oldSel,
-                                                     m_width, m_height, newImgs, m_selection.path(),
-                                                     "Flip Vertical"));
-    }
-}
-
-void Document::rotate90CW(bool recordUndo) {
-    if (m_hasFloatingSelection) {
-        bakeFloatingSelection();
-    }
-
-    int oldW = m_width;
-    int oldH = m_height;
-    QPainterPath oldSel = m_selection.path();
-    QList<QImage> oldImgs;
-    if (recordUndo) {
-        for (const auto& l : m_layers) {
-            oldImgs.append(l->image().copy());
-        }
-    }
-
-    for (auto& l : m_layers) l->rotate90CW();
-    std::swap(m_width, m_height);
+    setDocumentDimensions(cropRect.width(), cropRect.height());
     m_selection.clear();
     emit selectionChanged();
     emit documentChanged();
 
-    if (recordUndo) {
-        QList<QImage> newImgs;
-        for (const auto& l : m_layers) {
-            newImgs.append(l->image().copy());
-        }
-        m_undoStack.push(new ImageGeometryUndoCommand(this, oldW, oldH, oldImgs, oldSel,
-                                                     m_width, m_height, newImgs, m_selection.path(),
-                                                     "Rotate 90° Clockwise"));
-    }
+    if (recordUndo) pushGeometryUndo(before, "Crop to Selection");
 }
 
-void Document::rotate90CCW(bool recordUndo) {
-    if (m_hasFloatingSelection) {
-        bakeFloatingSelection();
-    }
-
-    int oldW = m_width;
-    int oldH = m_height;
-    QPainterPath oldSel = m_selection.path();
-    QList<QImage> oldImgs;
-    if (recordUndo) {
-        for (const auto& l : m_layers) {
-            oldImgs.append(l->image().copy());
+void Document::applyImageTransform(ImageTransform op) {
+    for (auto& l : m_layers) {
+        switch (op) {
+            case ImageTransform::FlipHorizontal: l->flipHorizontal(); break;
+            case ImageTransform::FlipVertical:   l->flipVertical(); break;
+            case ImageTransform::Rotate90CW:     l->rotate90CW(); break;
+            case ImageTransform::Rotate90CCW:    l->rotate90CCW(); break;
+            case ImageTransform::Rotate180:      l->rotate180(); break;
         }
     }
 
-    for (auto& l : m_layers) l->rotate90CCW();
-    std::swap(m_width, m_height);
-    m_selection.clear();
+    // The selection follows the pixels it was drawn around: run its mask through the same transform.
+    QRegion newSelection;
+    if (!m_selection.isEmpty()) {
+        Layer maskLayer(m_selection.mask(m_width, m_height).convertToFormat(QImage::Format_ARGB32));
+        switch (op) {
+            case ImageTransform::FlipHorizontal: maskLayer.flipHorizontal(); break;
+            case ImageTransform::FlipVertical:   maskLayer.flipVertical(); break;
+            case ImageTransform::Rotate90CW:     maskLayer.rotate90CW(); break;
+            case ImageTransform::Rotate90CCW:    maskLayer.rotate90CCW(); break;
+            case ImageTransform::Rotate180:      maskLayer.rotate180(); break;
+        }
+        newSelection = Selection::regionFromMask(maskLayer.image().convertToFormat(QImage::Format_Grayscale8));
+    }
+    if (op == ImageTransform::Rotate90CW || op == ImageTransform::Rotate90CCW) {
+        setDocumentDimensions(m_height, m_width);
+    }
+    m_selection.setRegion(newSelection);
     emit selectionChanged();
     emit documentChanged();
+}
 
+static void transformWithUndo(Document* doc, ImageTransform op, bool recordUndo) {
+    if (doc->hasFloatingSelection()) {
+        doc->bakeFloatingSelection();
+    }
+    doc->applyImageTransform(op);
     if (recordUndo) {
-        QList<QImage> newImgs;
-        for (const auto& l : m_layers) {
-            newImgs.append(l->image().copy());
-        }
-        m_undoStack.push(new ImageGeometryUndoCommand(this, oldW, oldH, oldImgs, oldSel,
-                                                     m_width, m_height, newImgs, m_selection.path(),
-                                                     "Rotate 90° Counter-Clockwise"));
+        doc->undoStack()->push(new ImageTransformUndoCommand(doc, op));
     }
 }
 
-void Document::rotate180(bool recordUndo) {
+void Document::flipHorizontal(bool recordUndo) { transformWithUndo(this, ImageTransform::FlipHorizontal, recordUndo); }
+void Document::flipVertical(bool recordUndo)   { transformWithUndo(this, ImageTransform::FlipVertical, recordUndo); }
+void Document::rotate90CW(bool recordUndo)     { transformWithUndo(this, ImageTransform::Rotate90CW, recordUndo); }
+void Document::rotate90CCW(bool recordUndo)    { transformWithUndo(this, ImageTransform::Rotate90CCW, recordUndo); }
+void Document::rotate180(bool recordUndo)      { transformWithUndo(this, ImageTransform::Rotate180, recordUndo); }
+
+void Document::flipLayer(int index, Qt::Orientation orientation, bool recordUndo) {
+    auto l = layer(index);
+    if (!l) return;
     if (m_hasFloatingSelection) {
         bakeFloatingSelection();
     }
-
-    int oldW = m_width;
-    int oldH = m_height;
-    QPainterPath oldSel = m_selection.path();
-    QList<QImage> oldImgs;
-    if (recordUndo) {
-        for (const auto& l : m_layers) {
-            oldImgs.append(l->image().copy());
-        }
-    }
-
-    for (auto& l : m_layers) l->rotate180();
+    if (orientation == Qt::Horizontal) l->flipHorizontal();
+    else l->flipVertical();
     emit documentChanged();
-
     if (recordUndo) {
-        QList<QImage> newImgs;
-        for (const auto& l : m_layers) {
-            newImgs.append(l->image().copy());
-        }
-        m_undoStack.push(new ImageGeometryUndoCommand(this, oldW, oldH, oldImgs, oldSel,
-                                                     m_width, m_height, newImgs, m_selection.path(),
-                                                     "Rotate 180°"));
+        m_undoStack.push(new LayerFlipUndoCommand(this, index, orientation));
     }
 }
 
@@ -754,9 +698,49 @@ void Document::flatten(bool recordUndo) {
     }
 }
 
+// --- Compositing ---
+
+void Document::compositeRect(const QRect& rect, uint32_t* dst, qsizetype bytesPerLine) const {
+    const int w = rect.width();
+    const int h = rect.height();
+    auto dstRow = [&](int row) {
+        return reinterpret_cast<uint32_t*>(reinterpret_cast<uchar*>(dst) + row * bytesPerLine);
+    };
+    for (int row = 0; row < h; ++row) {
+        std::memset(dstRow(row), 0, static_cast<size_t>(w) * sizeof(uint32_t));
+    }
+
+    for (int i = 0; i < m_layers.size(); ++i) {
+        const Layer& layer = *m_layers.at(i);
+        if (!layer.isVisible()) continue;
+
+        // Layers normally match the canvas size; clip defensively in case one does not.
+        const QRect src = rect.intersected(layer.image().rect());
+        if (!src.isEmpty() && layer.opacity() > 0) {
+            for (int y = src.top(); y <= src.bottom(); ++y) {
+                blendImages(dstRow(y - rect.top()) + (src.left() - rect.left()),
+                            layer.scanLine(y) + src.left(), src.width(),
+                            layer.blendMode(), layer.opacity());
+            }
+        }
+
+        // The floating selection sits directly above the layer it belongs to
+        if (m_hasFloatingSelection && i == m_floatingLayerIndex && rect.intersects(floatingBounds())) {
+            const QImage& srcImg = !m_originalFloatingImage.isNull() ? m_originalFloatingImage : m_floatingImage;
+            QImage view(reinterpret_cast<uchar*>(dst), w, h, bytesPerLine, QImage::Format_ARGB32);
+            QPainter p(&view);
+            p.setOpacity(layer.opacity() / 255.0);
+            p.setRenderHint(QPainter::SmoothPixmapTransform, true);
+            p.setRenderHint(QPainter::Antialiasing, true);
+            p.translate(-rect.topLeft());
+            p.setTransform(m_floatingTransform, true);
+            p.drawImage(0, 0, srcImg);
+        }
+    }
+}
+
 QImage Document::composite() const {
-    QImage result(m_width, m_height, QImage::Format_ARGB32);
-    result.fill(Qt::transparent);
+    QImage result;
     compositeInto(result);
     return result;
 }
@@ -765,31 +749,47 @@ void Document::compositeInto(QImage& target) const {
     if (target.width() != m_width || target.height() != m_height || target.format() != QImage::Format_ARGB32) {
         target = QImage(m_width, m_height, QImage::Format_ARGB32);
     }
-    target.fill(Qt::transparent);
+    if (target.isNull()) return;
+    uchar* bits = target.bits(); // detach before handing rows to worker threads
+    const qsizetype bpl = target.bytesPerLine();
+    parallelFor(0, m_height, 64, [&](int y0, int y1) {
+        compositeRect(QRect(0, y0, m_width, y1 - y0), reinterpret_cast<uint32_t*>(bits + y0 * bpl), bpl);
+    });
+}
 
-    int pixelCount = m_width * m_height;
-    uint32_t* targetBits = reinterpret_cast<uint32_t*>(target.bits());
+QRgb Document::compositePixel(int x, int y) const {
+    if (x < 0 || y < 0 || x >= m_width || y >= m_height) return 0;
+    uint32_t px = 0;
+    compositeRect(QRect(x, y, 1, 1), &px, sizeof(px));
+    return px;
+}
 
+QImage Document::thumbnail(const QSize& maxSize) const {
+    if (m_width <= 0 || m_height <= 0 || maxSize.isEmpty()) return QImage();
+    const QSize size = QSize(m_width, m_height).scaled(maxSize, Qt::KeepAspectRatio).expandedTo(QSize(1, 1));
+
+    // Point-sample each layer down to thumbnail size first, then blend the tiny images.
+    // That costs O(thumbnail pixels) per layer instead of a full-resolution composite.
+    QImage result(size, QImage::Format_ARGB32);
+    result.fill(Qt::transparent);
     for (int i = 0; i < m_layers.size(); ++i) {
-        const auto& layer = m_layers.at(i);
-        if (!layer->isVisible()) continue;
-        blendImages(targetBits, layer->bits(), pixelCount, layer->blendMode(), layer->opacity());
-
-        // Composite floating selection directly above active layer
-        if (i == m_activeLayerIndex && m_hasFloatingSelection) {
+        const Layer& layer = *m_layers.at(i);
+        if (!layer.isVisible() || layer.opacity() == 0) continue;
+        QImage small = layer.image().scaled(size, Qt::IgnoreAspectRatio, Qt::FastTransformation);
+        if (m_hasFloatingSelection && i == m_floatingLayerIndex) {
             const QImage& srcImg = !m_originalFloatingImage.isNull() ? m_originalFloatingImage : m_floatingImage;
-            if (!srcImg.isNull()) {
-                QPainter p(&target);
-                p.setOpacity(layer->opacity() / 255.0);
-                p.setRenderHint(QPainter::SmoothPixmapTransform, true);
-                p.setRenderHint(QPainter::Antialiasing, true);
-                p.setTransform(m_floatingTransform);
-                p.drawImage(0, 0, srcImg);
-                p.end();
-                targetBits = reinterpret_cast<uint32_t*>(target.bits());
-            }
+            QPainter p(&small);
+            p.scale(static_cast<qreal>(size.width()) / m_width, static_cast<qreal>(size.height()) / m_height);
+            p.setTransform(m_floatingTransform, true);
+            p.drawImage(0, 0, srcImg);
+        }
+        for (int y = 0; y < size.height(); ++y) {
+            blendImages(reinterpret_cast<uint32_t*>(result.scanLine(y)),
+                        reinterpret_cast<const uint32_t*>(small.constScanLine(y)),
+                        size.width(), layer.blendMode(), layer.opacity());
         }
     }
+    return result;
 }
 
 } // namespace pdn

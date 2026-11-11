@@ -616,15 +616,16 @@ int main(int argc, char* argv[]) {
         assert(brushSpin->focusPolicy() != Qt::NoFocus);
         brushSpin->setFocus();
 
-        // Initially tool is Paintbrush, switch to Pencil
-        win.toolManager()->setActiveTool(pdn::ToolType::Pencil);
-        assert(win.toolManager()->activeToolType() == pdn::ToolType::Pencil);
+        // Initially tool is Paintbrush, switch to Eraser (another tool that shows the width box;
+        // tools without a width, like the Pencil, hide it)
+        win.toolManager()->setActiveTool(pdn::ToolType::Eraser);
+        assert(win.toolManager()->activeToolType() == pdn::ToolType::Eraser);
 
         // Sending key 'B' while brushSpin has focus should NOT switch tool to Paintbrush
         QWidget* spinFocus = QApplication::focusWidget();
         if (!spinFocus) spinFocus = brushSpin;
         QApplication::sendEvent(spinFocus, &keyB);
-        assert(win.toolManager()->activeToolType() == pdn::ToolType::Pencil);
+        assert(win.toolManager()->activeToolType() == pdn::ToolType::Eraser);
 
         // Value changes in brushSpin sync to toolManager context
         brushSpin->setValue(25);

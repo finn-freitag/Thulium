@@ -7,9 +7,40 @@
 
 namespace pdn {
 
+// The part of a layer image that an edit changed, before and after.
+// Storing just this rectangle (instead of two full copies of the layer) keeps the undo
+// history small: a brush stroke on a 6000x4000 layer costs kilobytes, not ~190 MB.
+class ImagePatch {
+public:
+    ImagePatch() = default;
+    // Captures the difference between before and after. If hint is valid, only that
+    // rectangle is examined (callers that know what they touched avoid a full scan).
+    ImagePatch(const QImage& before, const QImage& after, const QRect& hint = QRect());
+
+    bool isEmpty() const { return m_rect.isEmpty() && m_fullBefore.isNull(); }
+    QRect rect() const { return m_rect; }
+
+    // Writes the before/after pixels into the layer and notifies the document.
+    void applyBefore(Document* doc, int layerIndex) const { apply(doc, layerIndex, m_before, m_fullBefore); }
+    void applyAfter(Document* doc, int layerIndex) const { apply(doc, layerIndex, m_after, m_fullAfter); }
+
+private:
+    void apply(Document* doc, int layerIndex, const QImage& patch, const QImage& full) const;
+
+    QRect m_rect;
+    QImage m_before;
+    QImage m_after;
+    // Fallback when the image size changed and a rectangle patch cannot describe the edit.
+    QImage m_fullBefore;
+    QImage m_fullAfter;
+};
+
 class LayerBitmapUndoCommand : public QUndoCommand {
 public:
+    // oldImage is the layer content before the edit; the layer's current content is the result.
     LayerBitmapUndoCommand(Document* doc, int layerIndex, const QImage& oldImage, const QString& text = "Paint");
+    LayerBitmapUndoCommand(Document* doc, int layerIndex, const QImage& oldImage, const QRect& changedRect,
+                           const QString& text);
 
     void undo() override;
     void redo() override;
@@ -17,8 +48,7 @@ public:
 private:
     Document* m_doc;
     int m_layerIndex;
-    QImage m_oldImage;
-    QImage m_newImage;
+    ImagePatch m_patch;
     bool m_firstRedo = true;
 };
 
@@ -96,6 +126,8 @@ public:
     void redo() override;
 
 private:
+    void apply(const QString& name, uint8_t opacity, BlendMode mode, bool visible);
+
     Document* m_doc;
     int m_index;
     QString m_oldName, m_newName;
@@ -104,30 +136,48 @@ private:
     bool m_oldVisible, m_newVisible;
 };
 
-class ImageGeometryUndoCommand : public QUndoCommand {
+// Flips one layer; a flip is its own inverse, so no pixel data is stored.
+class LayerFlipUndoCommand : public QUndoCommand {
 public:
-    ImageGeometryUndoCommand(Document* doc,
-                            int oldWidth, int oldHeight,
-                            const QList<QImage>& oldImages,
-                            const QPainterPath& oldSelectionPath,
-                            int newWidth, int newHeight,
-                            const QList<QImage>& newImages,
-                            const QPainterPath& newSelectionPath,
-                            const QString& text);
+    LayerFlipUndoCommand(Document* doc, int index, Qt::Orientation orientation);
 
     void undo() override;
     void redo() override;
 
 private:
     Document* m_doc;
-    int m_oldWidth;
-    int m_oldHeight;
-    QList<QImage> m_oldImages;
-    QPainterPath m_oldSelectionPath;
-    int m_newWidth;
-    int m_newHeight;
-    QList<QImage> m_newImages;
-    QPainterPath m_newSelectionPath;
+    int m_index;
+    Qt::Orientation m_orientation;
+    bool m_firstRedo = true;
+};
+
+// Resize / canvas size / crop: swaps complete before and after states.
+class ImageGeometryUndoCommand : public QUndoCommand {
+public:
+    ImageGeometryUndoCommand(Document* doc, const GeometrySnapshot& before, const GeometrySnapshot& after,
+                             const QString& text);
+
+    void undo() override;
+    void redo() override;
+
+private:
+    Document* m_doc;
+    GeometrySnapshot m_before;
+    GeometrySnapshot m_after;
+    bool m_firstRedo = true;
+};
+
+// Whole-image flip / rotation: undone by applying the inverse transform.
+class ImageTransformUndoCommand : public QUndoCommand {
+public:
+    ImageTransformUndoCommand(Document* doc, ImageTransform op);
+
+    void undo() override;
+    void redo() override;
+
+private:
+    Document* m_doc;
+    ImageTransform m_op;
     bool m_firstRedo = true;
 };
 
@@ -174,6 +224,8 @@ public:
     void redo() override;
 
 private:
+    void apply(const QRegion& region);
+
     Document* m_doc;
     QRegion m_oldRegion;
     QRegion m_newRegion;
@@ -201,17 +253,17 @@ private:
     bool m_firstRedo = true;
 };
 
+// Lifting the selected pixels off the layer into a floating selection, plus its first transform.
 class LiftFloatingUndoCommand : public QUndoCommand {
 public:
+    // preLiftLayerImage is the layer before lifting; the layer's current content is the post-lift state.
     LiftFloatingUndoCommand(Document* doc,
                             int layerIndex,
                             const QImage& preLiftLayerImage,
-                            const QImage& postLiftLayerImage,
                             const QImage& floatingImage,
-                            const QTransform& initialTransform,
                             const QTransform& newTransform,
-                            const QPainterPath& initialSelectionPath,
-                            const QPainterPath& newSelectionPath,
+                            const QRegion& initialSelection,
+                            const QRegion& newSelection,
                             const QString& text = "Move Pixels");
 
     void undo() override;
@@ -220,13 +272,11 @@ public:
 private:
     Document* m_doc;
     int m_layerIndex;
-    QImage m_preLiftLayerImage;
-    QImage m_postLiftLayerImage;
-    QImage m_floatingImage;
-    QTransform m_initialTransform;
+    ImagePatch m_layerPatch;
+    FloatingSelectionState m_liftedState;
     QTransform m_newTransform;
-    QPainterPath m_initialSelectionPath;
-    QPainterPath m_newSelectionPath;
+    QRegion m_initialSelection;
+    QRegion m_newSelection;
     bool m_firstRedo = true;
 };
 
@@ -235,48 +285,35 @@ public:
     TransformFloatingUndoCommand(Document* doc,
                                  const QTransform& oldTransform,
                                  const QTransform& newTransform,
-                                 const QPainterPath& oldPath,
-                                 const QPainterPath& newPath,
+                                 const QRegion& oldSelection,
+                                 const QRegion& newSelection,
                                  const QString& text = "Move Pixels");
 
     void undo() override;
     void redo() override;
 
 private:
+    void apply(const QTransform& transform, const QRegion& selection);
+
     Document* m_doc;
     QTransform m_oldTransform;
     QTransform m_newTransform;
-    QPainterPath m_oldPath;
-    QPainterPath m_newPath;
+    QRegion m_oldSelection;
+    QRegion m_newSelection;
     bool m_firstRedo = true;
 };
 
-class TransformSelectionUndoCommand : public QUndoCommand {
-public:
-    TransformSelectionUndoCommand(Document* doc,
-                                  const QPainterPath& oldPath,
-                                  const QPainterPath& newPath,
-                                  const QString& text = "Move Selection");
-
-    void undo() override;
-    void redo() override;
-
-private:
-    Document* m_doc;
-    QPainterPath m_oldPath;
-    QPainterPath m_newPath;
-    bool m_firstRedo = true;
-};
-
+// Merging the floating selection back into its layer.
 class BakeFloatingUndoCommand : public QUndoCommand {
 public:
+    // preBakeImage is the layer before baking; the layer's current content is the baked result.
     BakeFloatingUndoCommand(Document* doc,
                             int layerIndex,
                             const QImage& preBakeImage,
-                            const QImage& postBakeImage,
+                            const QRect& affectedRect,
                             const FloatingSelectionState& floatingState,
-                            const QPainterPath& preSelectionPath,
-                            const QPainterPath& postSelectionPath,
+                            const QRegion& preSelection,
+                            const QRegion& postSelection,
                             const QString& text = "Deselect");
 
     void undo() override;
@@ -285,11 +322,10 @@ public:
 private:
     Document* m_doc;
     int m_layerIndex;
-    QImage m_preBakeImage;
-    QImage m_postBakeImage;
+    ImagePatch m_layerPatch;
     FloatingSelectionState m_floatingState;
-    QPainterPath m_preSelectionPath;
-    QPainterPath m_postSelectionPath;
+    QRegion m_preSelection;
+    QRegion m_postSelection;
     bool m_firstRedo = true;
 };
 

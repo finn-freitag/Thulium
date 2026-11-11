@@ -1,348 +1,205 @@
 #include "SelectionTools.h"
+#include "../core/FloodFill.h"
 #include "../core/History.h"
 #include <QPen>
-#include <QQueue>
-#include <cmath>
-#include <vector>
 #include <algorithm>
+#include <cmath>
 
 namespace pdn {
 
-// --- RectangleSelectTool ---
-void RectangleSelectTool::mousePress(QMouseEvent* /*event*/, Document* doc, const QPointF& docPos, ToolContext& /*ctx*/) {
-    if (doc && doc->hasFloatingSelection()) {
+namespace {
+
+constexpr int kClickTolerancePx = 2; // screen pixels the mouse may move and still count as a click
+
+QRegion combineRegions(const QRegion& base, const QRegion& shape, SelectionCombineMode mode) {
+    switch (mode) {
+        case SelectionCombineMode::Union:     return base.united(shape);
+        case SelectionCombineMode::Exclude:   return base.subtracted(shape);
+        case SelectionCombineMode::Intersect: return base.intersected(shape);
+        case SelectionCombineMode::Invert:    return base.xored(shape);
+        case SelectionCombineMode::Replace:   break;
+    }
+    return shape;
+}
+
+// Pixel rectangle spanned by two drag positions, both end pixels included.
+QRect pixelRect(const QPointF& a, const QPointF& b) {
+    const int x0 = static_cast<int>(std::floor(a.x()));
+    const int y0 = static_cast<int>(std::floor(a.y()));
+    const int x1 = static_cast<int>(std::floor(b.x()));
+    const int y1 = static_cast<int>(std::floor(b.y()));
+    return QRect(QPoint(std::min(x0, x1), std::min(y0, y1)), QPoint(std::max(x0, x1), std::max(y0, y1)));
+}
+
+} // namespace
+
+SelectionCombineMode selectionModeForEvent(const QMouseEvent* event, Qt::MouseButton button, const ToolContext& ctx) {
+    const Qt::KeyboardModifiers mods = event ? event->modifiers() : Qt::NoModifier;
+    const bool ctrl = mods & Qt::ControlModifier;
+    if (button == Qt::RightButton) {
+        return ctrl ? SelectionCombineMode::Invert : SelectionCombineMode::Exclude;
+    }
+    if (ctrl || (mods & Qt::ShiftModifier)) {
+        return SelectionCombineMode::Union;
+    }
+    return ctx.selectionCombineMode;
+}
+
+void commitSelection(Document* doc, const QRegion& oldRegion, const QRegion& newRegion, const QString& actionName) {
+    doc->selection().setRegion(newRegion);
+    // Compare what the selection actually holds: it clips to the canvas
+    if (doc->selection().region() != oldRegion) {
+        doc->undoStack()->push(new SelectionUndoCommand(doc, oldRegion, doc->selection().region(), actionName));
+    }
+    emit doc->selectionChanged();
+}
+
+// --- DragSelectTool ---
+
+SelectionCombineMode DragSelectTool::effectiveMode(const QMouseEvent* event, const ToolContext& ctx) const {
+    return selectionModeForEvent(event, m_button, ctx);
+}
+
+void DragSelectTool::deactivate(Document* doc, ToolContext& /*ctx*/) {
+    if (m_selecting && doc) {
+        // Abandon the unfinished drag
+        doc->selection().setRegion(m_baseRegion);
+        emit doc->selectionChanged();
+    }
+    m_selecting = false;
+}
+
+void DragSelectTool::mousePress(QMouseEvent* event, Document* doc, const QPointF& docPos, ToolContext& /*ctx*/) {
+    if (!doc || m_selecting) return;
+    if (doc->hasFloatingSelection()) {
         doc->bakeFloatingSelection();
     }
+    m_button = event ? event->button() : Qt::LeftButton;
+    m_pressScreenPos = event ? event->pos() : QPoint();
     m_startPos = docPos;
     m_currentPos = docPos;
+    m_baseRegion = doc->selection().region();
     m_selecting = true;
+    m_dragged = false;
 }
 
-void RectangleSelectTool::mouseMove(QMouseEvent* /*event*/, Document* doc, const QPointF& docPos, ToolContext& /*ctx*/) {
-    if (!m_selecting) return;
-    m_currentPos = docPos;
-    emit doc->documentChanged();
+void DragSelectTool::applyShape(Document* doc, SelectionCombineMode mode) {
+    doc->selection().setRegion(combineRegions(m_baseRegion, shapeRegion(m_startPos, m_currentPos), mode));
+    emit doc->selectionChanged();
 }
 
-void RectangleSelectTool::mouseRelease(QMouseEvent* event, Document* doc, const QPointF& docPos, ToolContext& ctx) {
+void DragSelectTool::mouseMove(QMouseEvent* event, Document* doc, const QPointF& docPos, ToolContext& ctx) {
     if (!m_selecting) return;
-    m_selecting = false;
     m_currentPos = docPos;
-
-    bool shiftHeld = event && (event->modifiers() & Qt::ShiftModifier);
-    SelectionCombineMode effectiveMode = shiftHeld ? SelectionCombineMode::Union : ctx.selectionCombineMode;
-
-    QRectF dragRect(m_startPos, m_currentPos);
-    dragRect = dragRect.normalized();
-    QRegion oldRegion = doc->selection().region();
-
-    if (dragRect.width() > 2 || dragRect.height() > 2) {
-        int x0 = static_cast<int>(std::floor(m_startPos.x()));
-        int y0 = static_cast<int>(std::floor(m_startPos.y()));
-        int x1 = static_cast<int>(std::floor(m_currentPos.x()));
-        int y1 = static_cast<int>(std::floor(m_currentPos.y()));
-        int left = std::min(x0, x1);
-        int top = std::min(y0, y1);
-        int right = std::max(x0, x1) + 1;
-        int bottom = std::max(y0, y1) + 1;
-        QRect pixelRect(left, top, right - left, bottom - top);
-
-        doc->selection().addRect(pixelRect, effectiveMode);
-        QRegion newRegion = doc->selection().region();
-        if (oldRegion != newRegion) {
-            doc->undoStack()->push(new SelectionUndoCommand(doc, oldRegion, newRegion, "Rectangle Select"));
-        }
-        emit doc->selectionChanged();
-    } else {
-        if (effectiveMode == SelectionCombineMode::Replace) {
-            if (!doc->selection().isEmpty()) {
-                doc->clearSelection();
-                doc->undoStack()->push(new SelectionUndoCommand(doc, oldRegion, QRegion(), "Deselect"));
-            }
-        }
+    dragMoved(docPos);
+    if (event && (event->pos() - m_pressScreenPos).manhattanLength() > kClickTolerancePx) {
+        m_dragged = true;
     }
-    emit doc->documentChanged();
+    // Show the real selection (marching ants and all) while dragging
+    if (m_dragged && livePreview()) {
+        applyShape(doc, effectiveMode(event, ctx));
+    }
 }
 
-void RectangleSelectTool::drawOverlay(QPainter& painter, const RenderOptions& opts) {
+void DragSelectTool::mouseRelease(QMouseEvent* event, Document* doc, const QPointF& docPos, ToolContext& ctx) {
     if (!m_selecting) return;
-    int x0 = static_cast<int>(std::floor(m_startPos.x()));
-    int y0 = static_cast<int>(std::floor(m_startPos.y()));
-    int x1 = static_cast<int>(std::floor(m_currentPos.x()));
-    int y1 = static_cast<int>(std::floor(m_currentPos.y()));
-    int left = std::min(x0, x1);
-    int top = std::min(y0, y1);
-    int right = std::max(x0, x1) + 1;
-    int bottom = std::max(y0, y1) + 1;
+    m_currentPos = docPos;
+    dragMoved(docPos);
+    if (event && (event->pos() - m_pressScreenPos).manhattanLength() > kClickTolerancePx) {
+        m_dragged = true;
+    }
+    finish(doc, effectiveMode(event, ctx), m_dragged);
+}
 
-    QRectF vpRect(opts.panOffset.x() + left * opts.zoom,
-                  opts.panOffset.y() + top * opts.zoom,
-                  (right - left) * opts.zoom,
-                  (bottom - top) * opts.zoom);
+void DragSelectTool::finish(Document* doc, SelectionCombineMode mode, bool wasDrag) {
+    m_selecting = false;
+    if (wasDrag) {
+        commitSelection(doc, m_baseRegion, combineRegions(m_baseRegion, shapeRegion(m_startPos, m_currentPos), mode), name());
+    } else if (mode == SelectionCombineMode::Replace && !m_baseRegion.isEmpty()) {
+        // A plain click deselects
+        commitSelection(doc, m_baseRegion, QRegion(), "Deselect");
+    } else {
+        doc->selection().setRegion(m_baseRegion);
+        emit doc->selectionChanged();
+    }
+}
 
-    painter.save();
-    painter.setPen(QPen(QColor(0, 120, 215), 1.0, Qt::DashLine));
-    painter.setBrush(QColor(0, 120, 215, 40));
-    painter.drawRect(vpRect);
-    painter.restore();
+// --- RectangleSelectTool ---
+
+QRegion RectangleSelectTool::shapeRegion(const QPointF& start, const QPointF& current) const {
+    return QRegion(pixelRect(start, current));
 }
 
 // --- EllipseSelectTool ---
-void EllipseSelectTool::mousePress(QMouseEvent* /*event*/, Document* doc, const QPointF& docPos, ToolContext& /*ctx*/) {
-    if (doc && doc->hasFloatingSelection()) {
-        doc->bakeFloatingSelection();
-    }
-    m_startPos = docPos;
-    m_currentPos = docPos;
-    m_selecting = true;
-}
 
-void EllipseSelectTool::mouseMove(QMouseEvent* /*event*/, Document* doc, const QPointF& docPos, ToolContext& /*ctx*/) {
-    if (!m_selecting) return;
-    m_currentPos = docPos;
-    emit doc->documentChanged();
-}
-
-void EllipseSelectTool::mouseRelease(QMouseEvent* event, Document* doc, const QPointF& docPos, ToolContext& ctx) {
-    if (!m_selecting) return;
-    m_selecting = false;
-    m_currentPos = docPos;
-
-    bool shiftHeld = event && (event->modifiers() & Qt::ShiftModifier);
-    SelectionCombineMode effectiveMode = shiftHeld ? SelectionCombineMode::Union : ctx.selectionCombineMode;
-
-    QRectF dragRect(m_startPos, m_currentPos);
-    dragRect = dragRect.normalized();
-    QRegion oldRegion = doc->selection().region();
-
-    if (dragRect.width() > 2 || dragRect.height() > 2) {
-        int x0 = static_cast<int>(std::floor(m_startPos.x()));
-        int y0 = static_cast<int>(std::floor(m_startPos.y()));
-        int x1 = static_cast<int>(std::floor(m_currentPos.x()));
-        int y1 = static_cast<int>(std::floor(m_currentPos.y()));
-        int left = std::min(x0, x1);
-        int top = std::min(y0, y1);
-        int right = std::max(x0, x1) + 1;
-        int bottom = std::max(y0, y1) + 1;
-        QRect pixelRect(left, top, right - left, bottom - top);
-
-        doc->selection().addEllipse(pixelRect, effectiveMode);
-        QRegion newRegion = doc->selection().region();
-        if (oldRegion != newRegion) {
-            doc->undoStack()->push(new SelectionUndoCommand(doc, oldRegion, newRegion, "Ellipse Select"));
-        }
-        emit doc->selectionChanged();
-    } else {
-        if (effectiveMode == SelectionCombineMode::Replace) {
-            if (!doc->selection().isEmpty()) {
-                doc->clearSelection();
-                doc->undoStack()->push(new SelectionUndoCommand(doc, oldRegion, QRegion(), "Deselect"));
-            }
-        }
-    }
-    emit doc->documentChanged();
-}
-
-void EllipseSelectTool::drawOverlay(QPainter& painter, const RenderOptions& opts) {
-    if (!m_selecting) return;
-    int x0 = static_cast<int>(std::floor(m_startPos.x()));
-    int y0 = static_cast<int>(std::floor(m_startPos.y()));
-    int x1 = static_cast<int>(std::floor(m_currentPos.x()));
-    int y1 = static_cast<int>(std::floor(m_currentPos.y()));
-    int left = std::min(x0, x1);
-    int top = std::min(y0, y1);
-    int right = std::max(x0, x1) + 1;
-    int bottom = std::max(y0, y1) + 1;
-
-    QRectF vpRect(opts.panOffset.x() + left * opts.zoom,
-                  opts.panOffset.y() + top * opts.zoom,
-                  (right - left) * opts.zoom,
-                  (bottom - top) * opts.zoom);
-
-    painter.save();
-    painter.setPen(QPen(QColor(0, 120, 215), 1.0, Qt::DashLine));
-    painter.setBrush(QColor(0, 120, 215, 40));
-    painter.drawEllipse(vpRect);
-    painter.restore();
+QRegion EllipseSelectTool::shapeRegion(const QPointF& start, const QPointF& current) const {
+    return Selection::regionFromEllipse(pixelRect(start, current));
 }
 
 // --- LassoSelectTool ---
-void LassoSelectTool::mousePress(QMouseEvent* /*event*/, Document* doc, const QPointF& docPos, ToolContext& /*ctx*/) {
-    if (doc && doc->hasFloatingSelection()) {
-        doc->bakeFloatingSelection();
-    }
+
+void LassoSelectTool::mousePress(QMouseEvent* event, Document* doc, const QPointF& docPos, ToolContext& ctx) {
     m_polygon.clear();
     m_polygon << docPos;
-    m_selecting = true;
+    DragSelectTool::mousePress(event, doc, docPos, ctx);
 }
 
-void LassoSelectTool::mouseMove(QMouseEvent* /*event*/, Document* doc, const QPointF& docPos, ToolContext& /*ctx*/) {
-    if (!m_selecting) return;
-    m_polygon << docPos;
-    emit doc->documentChanged();
-}
-
-void LassoSelectTool::mouseRelease(QMouseEvent* event, Document* doc, const QPointF& docPos, ToolContext& ctx) {
-    if (!m_selecting) return;
-    m_selecting = false;
-    m_polygon << docPos;
-
-    bool shiftHeld = event && (event->modifiers() & Qt::ShiftModifier);
-    SelectionCombineMode effectiveMode = shiftHeld ? SelectionCombineMode::Union : ctx.selectionCombineMode;
-
-    QRectF bounds = m_polygon.boundingRect();
-    QRegion oldRegion = doc->selection().region();
-
-    if (m_polygon.size() >= 3 && (bounds.width() > 2 || bounds.height() > 2)) {
-        doc->selection().addPolygon(m_polygon, effectiveMode);
-        QRegion newRegion = doc->selection().region();
-        if (oldRegion != newRegion) {
-            doc->undoStack()->push(new SelectionUndoCommand(doc, oldRegion, newRegion, "Lasso Select"));
-        }
-        emit doc->selectionChanged();
-    } else {
-        if (effectiveMode == SelectionCombineMode::Replace) {
-            if (!doc->selection().isEmpty()) {
-                doc->clearSelection();
-                doc->undoStack()->push(new SelectionUndoCommand(doc, oldRegion, QRegion(), "Deselect"));
-            }
-        }
+void LassoSelectTool::dragMoved(const QPointF& docPos) {
+    if (m_polygon.isEmpty() || m_polygon.last() != docPos) {
+        m_polygon << docPos;
     }
-    m_polygon.clear();
-    emit doc->documentChanged();
+}
+
+QRegion LassoSelectTool::shapeRegion(const QPointF& /*start*/, const QPointF& /*current*/) const {
+    if (m_polygon.size() < 3) return QRegion();
+    QPainterPath path;
+    path.addPolygon(m_polygon);
+    path.closeSubpath();
+    return Selection::regionFromPath(path);
 }
 
 void LassoSelectTool::drawOverlay(QPainter& painter, const RenderOptions& opts) {
-    if (!m_selecting || m_polygon.isEmpty()) return;
+    if (!isSelecting() || m_polygon.size() < 2) return;
 
     QPolygonF vpPoly;
+    vpPoly.reserve(m_polygon.size());
     for (const auto& pt : m_polygon) {
-        vpPoly << QPointF(opts.panOffset.x() + pt.x() * opts.zoom,
-                          opts.panOffset.y() + pt.y() * opts.zoom);
+        vpPoly << opts.panOffset + pt * opts.zoom;
     }
 
     painter.save();
-    painter.setPen(QPen(QColor(0, 120, 215), 1.0, Qt::DashLine));
-    painter.setBrush(QColor(0, 120, 215, 40));
+    painter.setRenderHint(QPainter::Antialiasing, true);
+    painter.setBrush(QColor(0, 120, 215, 28));
+    painter.setPen(QPen(Qt::white, 2.0));
+    painter.drawPolygon(vpPoly);
+    painter.setBrush(Qt::NoBrush);
+    painter.setPen(QPen(Qt::black, 1.0, Qt::DashLine));
     painter.drawPolygon(vpPoly);
     painter.restore();
 }
 
 // --- MagicWandTool ---
+
 void MagicWandTool::mousePress(QMouseEvent* event, Document* doc, const QPointF& docPos, ToolContext& ctx) {
-    if (doc && doc->hasFloatingSelection()) {
+    if (!doc) return;
+    if (doc->hasFloatingSelection()) {
         doc->bakeFloatingSelection();
     }
-    bool shiftHeld = event && (event->modifiers() & Qt::ShiftModifier);
-    SelectionCombineMode effectiveMode = shiftHeld ? SelectionCombineMode::Union : ctx.selectionCombineMode;
+    const SelectionCombineMode mode = selectionModeForEvent(event, event ? event->button() : Qt::LeftButton, ctx);
+    const QRegion oldRegion = doc->selection().region();
+    const QPoint seed(static_cast<int>(std::floor(docPos.x())), static_cast<int>(std::floor(docPos.y())));
 
-    int x = static_cast<int>(docPos.x());
-    int y = static_cast<int>(docPos.y());
-    if (x < 0 || x >= doc->width() || y < 0 || y >= doc->height()) {
-        if (effectiveMode == SelectionCombineMode::Replace) {
-            if (!doc->selection().isEmpty()) {
-                QRegion oldRegion = doc->selection().region();
-                doc->clearSelection();
-                doc->undoStack()->push(new SelectionUndoCommand(doc, oldRegion, QRegion(), "Deselect"));
-            }
+    auto layer = doc->activeLayer();
+    if (!layer || !layer->image().rect().contains(seed)) {
+        // Clicking outside the canvas deselects
+        if (mode == SelectionCombineMode::Replace && !oldRegion.isEmpty()) {
+            commitSelection(doc, oldRegion, QRegion(), "Deselect");
         }
         return;
     }
 
-    floodSelect(doc, x, y, ctx.tolerance, effectiveMode);
-}
-
-void MagicWandTool::floodSelect(Document* doc, int startX, int startY, int tolerance, SelectionCombineMode mode) {
-    auto layer = doc->activeLayer();
-    if (!layer) return;
-
-    int w = doc->width();
-    int h = doc->height();
-
-    const uint32_t* bits = layer->bits();
-    uint32_t targetColor = bits[startY * w + startX];
-    int tr = (targetColor >> 16) & 0xFF;
-    int tg = (targetColor >> 8) & 0xFF;
-    int tb = targetColor & 0xFF;
-    int ta = (targetColor >> 24) & 0xFF;
-
-    double maxDiff = (tolerance / 100.0) * std::sqrt(255.0 * 255.0 * 4.0);
-
-    auto matches = [&](int x, int y) -> bool {
-        uint32_t px = bits[y * w + x];
-        if (px == targetColor) return true;
-        if (tolerance == 0) return false;
-        int pr = (px >> 16) & 0xFF;
-        int pg = (px >> 8) & 0xFF;
-        int pb = px & 0xFF;
-        int pa = (px >> 24) & 0xFF;
-
-        double d = std::sqrt(std::pow(pr - tr, 2) + std::pow(pg - tg, 2) +
-                             std::pow(pb - tb, 2) + std::pow(pa - ta, 2));
-        return d <= maxDiff;
-    };
-
-    std::vector<bool> visited(w * h, false);
-    std::vector<QPoint> queue;
-    queue.reserve(1024);
-    queue.push_back(QPoint(startX, startY));
-    visited[startY * w + startX] = true;
-
-    size_t head = 0;
-    const int dx[] = { 0, 0, -1, 1 };
-    const int dy[] = { -1, 1, 0, 0 };
-
-    while (head < queue.size()) {
-        QPoint pt = queue[head++];
-        int cx = pt.x();
-        int cy = pt.y();
-
-        for (int i = 0; i < 4; ++i) {
-            int nx = cx + dx[i];
-            int ny = cy + dy[i];
-            if (nx >= 0 && nx < w && ny >= 0 && ny < h) {
-                int idx = ny * w + nx;
-                if (!visited[idx] && matches(nx, ny)) {
-                    visited[idx] = true;
-                    queue.push_back(QPoint(nx, ny));
-                }
-            }
-        }
-    }
-
-    // Build strictly sorted non-overlapping horizontal spans row-by-row
-    QVector<QRect> rects;
-    for (int y = 0; y < h; ++y) {
-        int start = -1;
-        int rowOffset = y * w;
-        for (int x = 0; x < w; ++x) {
-            if (visited[rowOffset + x]) {
-                if (start == -1) start = x;
-            } else {
-                if (start != -1) {
-                    rects.append(QRect(start, y, x - start, 1));
-                    start = -1;
-                }
-            }
-        }
-        if (start != -1) {
-            rects.append(QRect(start, y, w - start, 1));
-        }
-    }
-
-    QRegion matchingRegion;
-    if (!rects.isEmpty()) {
-        matchingRegion.setRects(rects.data(), rects.size());
-    }
-
-    QRegion oldRegion = doc->selection().region();
-    doc->selection().addRegion(matchingRegion, mode);
-    QRegion newRegion = doc->selection().region();
-    if (oldRegion != newRegion) {
-        doc->undoStack()->push(new SelectionUndoCommand(doc, oldRegion, newRegion, "Magic Wand"));
-    }
-    emit doc->selectionChanged();
-    emit doc->documentChanged();
+    const FloodMask flood = floodFill(layer->image(), seed, ctx.tolerance, ctx.floodMode == FloodMode::Contiguous);
+    commitSelection(doc, oldRegion, combineRegions(oldRegion, flood.toRegion(), mode), "Magic Wand");
 }
 
 } // namespace pdn

@@ -54,13 +54,22 @@ public:
     virtual void initSessionFromDoc(Document* doc);
 
 protected:
-    virtual void onSessionStarted(Document* doc) {}
-    virtual void onTransformUpdated(Document* doc) {}
-    virtual void onSessionEnded(Document* doc) {}
+    virtual void onSessionStarted(Document* /*doc*/) {}
+    virtual void onTransformUpdated(Document* /*doc*/) {}
+    virtual void onSessionEnded(Document* /*doc*/) {}
     virtual bool isPixelTool() const { return false; }
 
     void updateDocTransform(Document* doc);
     QPointF currentCenter() const;
+
+    // Remembers the selection shape in the session's local coordinates (toDoc maps local -> document).
+    void captureLocalShape(const QRegion& region, const QTransform& toDoc);
+    // The captured shape under the current transform, snapped to pixels.
+    QRegion transformedRegion(const Document* doc) const;
+    // Writes transformedRegion() into the document's selection.
+    void applySelection(Document* doc);
+    // True if something other than this tool changed the selection since applySelection().
+    bool selectionChangedExternally(const Document* doc) const;
 
     QPointF docToVp(const QPointF& docPt) const;
     TransformHandle hitTestHandle(const QPointF& docPos, const std::array<QPointF, 4>& quad) const;
@@ -78,6 +87,9 @@ protected:
     QRectF m_localRect;
     QPainterPath m_localPath;
     QTransform m_transform;
+    QRegion m_baseRegion;        // selection when the shape was captured
+    QTransform m_baseTransform;  // transform when the shape was captured
+    quint64 m_selectionRevision = 0;
 
     // Drag start state
     QPointF m_pressDocPos;
@@ -85,11 +97,9 @@ protected:
     bool m_isDrag = false;
     QTransform m_initialTransform;
     std::array<QPointF, 4> m_initialQuad;
-    QPainterPath m_initialSelectionPath;
-    bool m_needsLiftOnDrag = false;
+    QRegion m_initialSelection;
     bool m_wasLiftedInThisDrag = false;
     QImage m_preLiftImage;
-    QImage m_postLiftImage;
     QImage m_liftedFloatingImage;
     int m_liftedLayerIndex = 0;
 
@@ -122,8 +132,6 @@ protected:
     void onSessionEnded(Document* doc) override;
     bool isPixelTool() const override { return false; }
 
-private:
-    QRegion m_startRegion;
 };
 
 class MoveSelectedPixelsTool : public MoveToolBase {
